@@ -7,7 +7,6 @@ on:
 permissions:
   contents: write
   id-token: write
-  attestations: write
 
 jobs:
   release:
@@ -49,10 +48,23 @@ jobs:
           "nupkg_path=$($nupkg.FullName)" >> $env:GITHUB_OUTPUT
           "nupkg_name=$($nupkg.Name)" >> $env:GITHUB_OUTPUT
 
-      - name: Attest build provenance
-        uses: actions/attest-build-provenance@v2
+      - name: Azure login
+        uses: azure/login@v2
         with:
-          subject-path: ${{ steps.package.outputs.nupkg_path }}
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Sign .nupkg
+        uses: azure/artifact-signing-action@v1
+        with:
+          endpoint: ${{ secrets.SIGNING_ENDPOINT }}
+          signing-account-name: ${{ secrets.SIGNING_ACCOUNT_NAME }}
+          certificate-profile-name: ${{ secrets.SIGNING_CERTIFICATE_PROFILE }}
+          files: ${{ steps.package.outputs.nupkg_path }}
+          file-digest: SHA256
+          timestamp-rfc3161: http://timestamp.acs.microsoft.com
+          timestamp-digest: SHA256
 
       - name: Upload .nupkg to release
         shell: pwsh
