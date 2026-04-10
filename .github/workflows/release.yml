@@ -72,6 +72,12 @@ jobs:
             -d SHA256 `
             -v Information
 
+      - name: Upload signed .nupkg as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: signed-nupkg
+          path: ${{ steps.package.outputs.nupkg_path }}
+
       - name: Create GitHub Release
         shell: pwsh
         env:
@@ -81,3 +87,22 @@ jobs:
             "${{ steps.package.outputs.nupkg_path }}" `
             --title "${{ github.ref_name }}" `
             --generate-notes
+
+  publish:
+    needs: release
+    runs-on: windows-latest
+    environment: PSGallery
+    steps:
+      - name: Download signed .nupkg
+        uses: actions/download-artifact@v4
+        with:
+          name: signed-nupkg
+
+      - name: Publish signed .nupkg to PowerShell Gallery
+        shell: pwsh
+        run: |
+          $nupkg = Get-ChildItem -Filter '*.nupkg' | Select-Object -First 1
+          dotnet nuget push $nupkg.FullName `
+            --source "https://www.powershellgallery.com/api/v2/package" `
+            --api-key "${{ secrets.PSGALLERY_API_KEY }}" `
+            --skip-duplicate
