@@ -46,7 +46,6 @@ jobs:
           $nupkg = Get-ChildItem $repoPath -Filter '*.nupkg' | Select-Object -First 1
           Write-Host "Packaged: $($nupkg.Name)"
           "nupkg_path=$($nupkg.FullName)" >> $env:GITHUB_OUTPUT
-          "nupkg_name=$($nupkg.Name)" >> $env:GITHUB_OUTPUT
 
       - name: Azure login
         uses: azure/login@v2
@@ -65,6 +64,7 @@ jobs:
           file-digest: SHA256
           timestamp-rfc3161: http://timestamp.acs.microsoft.com
           timestamp-digest: SHA256
+          # Only use AzureCliCredential established by azure/login OIDC step
           exclude-environment-credential: true
           exclude-workload-identity-credential: true
           exclude-managed-identity-credential: true
