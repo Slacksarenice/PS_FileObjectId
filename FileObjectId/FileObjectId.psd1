@@ -13,6 +13,7 @@
     PrivateData = @{
         PSData = @{
             Tags = @('NTFS','ObjectId','FileSystem','Windows')
+            LicenseUri = 'https://github.com/Slacksarenice/PS_FileObjectId/blob/main/LICENSE'
             ProjectUri = 'https://github.com/Slacksarenice/PS_FileObjectId'
         }
     }
