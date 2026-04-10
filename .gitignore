@@ -1,0 +1,11 @@
+# Claude Code
+.claude/
+
+# Planning/spec docs
+docs/superpowers/
+
+# Draft files
+*.new
+
+# Test output
+testResults.xml
