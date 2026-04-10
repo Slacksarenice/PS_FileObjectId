@@ -2,9 +2,8 @@
 
 ## Reporting a Vulnerability
 
-If you discover a security issue, please report it by
-[opening a GitHub issue](https://github.com/Slacksarenice/PS_FileObjectId/issues)
-or contacting the author directly.
+If you discover a security issue, please report it privately via GitHub's
+[private vulnerability reporting](https://github.com/Slacksarenice/PS_FileObjectId/security/advisories/new).
 
-Please do not open a public issue for critical vulnerabilities — use private
-disclosure via GitHub's security advisory feature instead.
+Please do not open a public GitHub issue for security vulnerabilities. Public
+issues should only be used for non-security bugs and feature requests.
