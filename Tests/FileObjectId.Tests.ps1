@@ -39,7 +39,7 @@ Describe 'ConvertTo-GuidFromHex' {
 
 Describe 'Get-FileObjectId' {
     It 'Returns the correct Guid from fsutil query output' {
-        Mock Get-FsutilObjectId { $fsutilQueryOutput }
+        Mock Get-FsutilObjectId { $fsutilQueryOutput } -ModuleName FileObjectId
 
         $result = Get-FileObjectId -Path $testPath
         $result | Should -BeOfType [Guid]
@@ -47,7 +47,7 @@ Describe 'Get-FileObjectId' {
     }
 
     It 'Throws when fsutil returns no Object ID line' {
-        Mock Get-FsutilObjectId { 'Error: The file or directory is not reparse point.' }
+        Mock Get-FsutilObjectId { 'Error: The file or directory is not reparse point.' } -ModuleName FileObjectId
 
         { Get-FileObjectId -Path $testPath } | Should -Throw '*No Object ID*'
     }
@@ -58,12 +58,12 @@ Describe 'Set-FileObjectId' {
         Mock Get-FsutilObjectId {
             $global:LASTEXITCODE = 0
             $fsutilQueryOutput
-        }
+        } -ModuleName FileObjectId
 
         $result = Set-FileObjectId -Path $testPath
         $result | Should -BeOfType [Guid]
         $result | Should -Be $testGuid
-        Should -Invoke Get-FsutilObjectId -Exactly 2
+        Should -Invoke Get-FsutilObjectId -Exactly 2 -ModuleName FileObjectId
     }
 
     It 'Creates an ID when file has none, then returns it' {
@@ -78,15 +78,15 @@ Describe 'Set-FileObjectId' {
                 $global:LASTEXITCODE = 0
                 $fsutilQueryOutput
             }
-        }
+        } -ModuleName FileObjectId
 
         Mock New-FsutilObjectId {
             $global:LASTEXITCODE = 0
-        }
+        } -ModuleName FileObjectId
 
         $result = Set-FileObjectId -Path $testPath
         $result | Should -BeOfType [Guid]
-        Should -Invoke New-FsutilObjectId -Exactly 1
+        Should -Invoke New-FsutilObjectId -Exactly 1 -ModuleName FileObjectId
     }
 }
 
