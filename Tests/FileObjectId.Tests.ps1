@@ -2,23 +2,30 @@
 
 BeforeAll {
     Import-Module "$PSScriptRoot\..\FileObjectId\FileObjectId.psd1" -Force
+
+    # Shared test data used across multiple Describe blocks
+    $script:testPath = 'C:\fakefile.txt'
+    $script:testHex  = '0102030405060708090a0b0c0d0e0f10'
+    $script:testGuid = '04030201-0605-0807-090a-0b0c0d0e0f10'
+    $script:fsutilQueryOutput = @(
+        "Object ID : $script:testHex"
+        "BirthVolume ID : 00000000000000000000000000000000"
+        "BirthObject ID : 00000000000000000000000000000000"
+        "Domain ID : 00000000000000000000000000000000"
+    )
 }
 
 Describe 'ConvertTo-GuidFromHex' {
     It 'Converts a valid 32-char hex string to the correct Guid' {
-        $hex  = '0102030405060708090a0b0c0d0e0f10'
-        $guid = ConvertTo-GuidFromHex -Hex $hex
+        $guid = ConvertTo-GuidFromHex -Hex $testHex
         $guid | Should -BeOfType [Guid]
-        $guid | Should -Be '04030201-0605-0807-090a-0b0c0d0e0f10'
+        $guid | Should -Be $testGuid
     }
 
     It 'Strips dashes and spaces before converting' {
-        $hex      = '01020304-05060708-090a0b0c-0d0e0f10'
-        $hexSpace = '01020304 05060708 090a0b0c 0d0e0f10'
-        $expected = ConvertTo-GuidFromHex -Hex '0102030405060708090a0b0c0d0e0f10'
-
-        ConvertTo-GuidFromHex -Hex $hex      | Should -Be $expected
-        ConvertTo-GuidFromHex -Hex $hexSpace | Should -Be $expected
+        $expected = ConvertTo-GuidFromHex -Hex $testHex
+        ConvertTo-GuidFromHex -Hex '01020304-05060708-090a0b0c-0d0e0f10' | Should -Be $expected
+        ConvertTo-GuidFromHex -Hex '01020304 05060708 090a0b0c 0d0e0f10' | Should -Be $expected
     }
 
     It 'Throws on wrong-length hex string' {
@@ -31,55 +38,38 @@ Describe 'ConvertTo-GuidFromHex' {
 }
 
 Describe 'Get-FileObjectId' {
-    BeforeAll {
-        $script:testPath = 'C:\fakefile.txt'
-    }
-
     It 'Returns the correct Guid from fsutil query output' {
-        Mock fsutil {
-            @(
-                "Object ID : 0102030405060708090a0b0c0d0e0f10"
-                "BirthVolume ID : 00000000000000000000000000000000"
-                "BirthObject ID : 00000000000000000000000000000000"
-                "Domain ID : 00000000000000000000000000000000"
-            )
-        } -ParameterFilter { $args[0] -eq 'objectid' -and $args[1] -eq 'query' }
+        Mock fsutil { $fsutilQueryOutput } -ParameterFilter {
+            $args[0] -eq 'objectid' -and $args[1] -eq 'query'
+        }
 
         $result = Get-FileObjectId -Path $testPath
         $result | Should -BeOfType [Guid]
-        $result | Should -Be '04030201-0605-0807-090a-0b0c0d0e0f10'
+        $result | Should -Be $testGuid
     }
 
     It 'Throws when fsutil returns no Object ID line' {
-        Mock fsutil {
-            @("Error: The file or directory is not reparse point.")
-        } -ParameterFilter { $args[0] -eq 'objectid' -and $args[1] -eq 'query' }
+        Mock fsutil { 'Error: The file or directory is not reparse point.' } -ParameterFilter {
+            $args[0] -eq 'objectid' -and $args[1] -eq 'query'
+        }
 
         { Get-FileObjectId -Path $testPath } | Should -Throw '*No Object ID*'
     }
 }
 
 Describe 'Set-FileObjectId' {
-    BeforeAll {
-        $script:testPath = 'C:\fakefile.txt'
-        $script:testHex  = '0102030405060708090a0b0c0d0e0f10'
-    }
-
     It 'Returns existing ID when file already has one' {
         Mock fsutil {
             $global:LASTEXITCODE = 0
-            @(
-                "Object ID : $testHex"
-                "BirthVolume ID : 00000000000000000000000000000000"
-                "BirthObject ID : 00000000000000000000000000000000"
-                "Domain ID : 00000000000000000000000000000000"
-            )
+            $fsutilQueryOutput
         } -ParameterFilter { $args[0] -eq 'objectid' -and $args[1] -eq 'query' }
 
         $result = Set-FileObjectId -Path $testPath
         $result | Should -BeOfType [Guid]
-        $result | Should -Be '04030201-0605-0807-090a-0b0c0d0e0f10'
-        Should -Invoke fsutil -Times 2 -Exactly
+        $result | Should -Be $testGuid
+        Should -Invoke fsutil -Exactly 2 -ParameterFilter {
+            $args[0] -eq 'objectid' -and $args[1] -eq 'query'
+        }
     }
 
     It 'Creates an ID when file has none, then returns it' {
@@ -89,15 +79,10 @@ Describe 'Set-FileObjectId' {
             $script:queryCallCount++
             if ($script:queryCallCount -eq 1) {
                 $global:LASTEXITCODE = 1
-                "Error: No object id"
+                'Error: No object id'
             } else {
                 $global:LASTEXITCODE = 0
-                @(
-                    "Object ID : $testHex"
-                    "BirthVolume ID : 00000000000000000000000000000000"
-                    "BirthObject ID : 00000000000000000000000000000000"
-                    "Domain ID : 00000000000000000000000000000000"
-                )
+                $fsutilQueryOutput
             }
         } -ParameterFilter { $args[0] -eq 'objectid' -and $args[1] -eq 'query' }
 
@@ -107,7 +92,9 @@ Describe 'Set-FileObjectId' {
 
         $result = Set-FileObjectId -Path $testPath
         $result | Should -BeOfType [Guid]
-        Should -Invoke fsutil -Times 1 -Exactly -ParameterFilter { $args[0] -eq 'objectid' -and $args[1] -eq 'set' }
+        Should -Invoke fsutil -Exactly 1 -ParameterFilter {
+            $args[0] -eq 'objectid' -and $args[1] -eq 'set'
+        }
     }
 }
 
