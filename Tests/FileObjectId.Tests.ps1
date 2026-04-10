@@ -56,14 +56,13 @@ Describe 'Get-FileObjectId' {
 Describe 'Set-FileObjectId' {
     It 'Returns existing ID when file already has one' {
         Mock Get-FsutilObjectId {
-            $global:LASTEXITCODE = 0
             $fsutilQueryOutput
         } -ModuleName PSFileObjectId
 
         $result = Set-FileObjectId -Path $testPath
         $result | Should -BeOfType [Guid]
         $result | Should -Be $testGuid
-        Should -Invoke Get-FsutilObjectId -Exactly 2 -ModuleName PSFileObjectId
+        Should -Invoke Get-FsutilObjectId -Exactly 1 -ModuleName PSFileObjectId
     }
 
     It 'Creates an ID when file has none, then returns it' {
@@ -72,21 +71,18 @@ Describe 'Set-FileObjectId' {
         Mock Get-FsutilObjectId {
             $script:queryCallCount++
             if ($script:queryCallCount -eq 1) {
-                $global:LASTEXITCODE = 1
-                'Error: No object id'
+                'The specified file has no object id'
             } else {
-                $global:LASTEXITCODE = 0
                 $fsutilQueryOutput
             }
         } -ModuleName PSFileObjectId
 
-        Mock New-FsutilObjectId {
-            $global:LASTEXITCODE = 0
-        } -ModuleName PSFileObjectId
+        Mock New-FsutilObjectId {} -ModuleName PSFileObjectId
 
         $result = Set-FileObjectId -Path $testPath
         $result | Should -BeOfType [Guid]
         Should -Invoke New-FsutilObjectId -Exactly 1 -ModuleName PSFileObjectId
+        Should -Invoke Get-FsutilObjectId -Exactly 2 -ModuleName PSFileObjectId
     }
 }
 
