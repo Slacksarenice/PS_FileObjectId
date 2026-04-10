@@ -1,0 +1,128 @@
+# FileObjectId.psm1
+# Track files by NTFS Object ID so you can find them after they're moved
+# or renamed anywhere on the same volume.
+
+if (-not ('Win32.FileId' -as [type])) {
+    Add-Type -Namespace Win32 -Name FileId -MemberDefinition @'
+[StructLayout(LayoutKind.Sequential)]
+public struct FILE_ID_DESCRIPTOR {
+    public uint dwSize;
+    public int Type;
+    public System.Guid Id;
+}
+
+[DllImport("kernel32.dll", SetLastError=true, CharSet=CharSet.Unicode)]
+public static extern Microsoft.Win32.SafeHandles.SafeFileHandle CreateFileW(
+    string lpFileName, uint dwDesiredAccess, uint dwShareMode,
+    IntPtr lpSecurityAttributes, uint dwCreationDisposition,
+    uint dwFlagsAndAttributes, IntPtr hTemplateFile);
+
+[DllImport("kernel32.dll", SetLastError=true)]
+public static extern Microsoft.Win32.SafeHandles.SafeFileHandle OpenFileById(
+    Microsoft.Win32.SafeHandles.SafeFileHandle hVolumeHint,
+    ref FILE_ID_DESCRIPTOR lpFileId,
+    uint dwDesiredAccess, uint dwShareMode,
+    IntPtr lpSecurityAttributes, uint dwFlagsAndAttributes);
+
+[DllImport("kernel32.dll", SetLastError=true, CharSet=CharSet.Unicode)]
+public static extern uint GetFinalPathNameByHandleW(
+    Microsoft.Win32.SafeHandles.SafeFileHandle hFile,
+    System.Text.StringBuilder lpszFilePath,
+    uint cchFilePath, uint dwFlags);
+'@
+}
+
+function ConvertTo-GuidFromHex {
+    <#
+    .SYNOPSIS
+        Converts a 32-character hex string (as printed by fsutil objectid) into a [Guid].
+    #>
+    param([Parameter(Mandatory)][string]$Hex)
+    $Hex = $Hex -replace '[^0-9a-fA-F]',''
+    if ($Hex.Length -ne 32) { throw "Expected 32 hex chars, got $($Hex.Length)" }
+    $bytes = [byte[]]::new(16)
+    for ($i = 0; $i -lt 16; $i++) {
+        $bytes[$i] = [Convert]::ToByte($Hex.Substring($i * 2, 2), 16)
+    }
+    [Guid]::new($bytes)
+}
+
+function Set-FileObjectId {
+    <#
+    .SYNOPSIS
+        Ensures a file has an NTFS Object ID, creating one if needed, and returns it.
+    .EXAMPLE
+        $id = Set-FileObjectId C:\notes\todo.txt
+    #>
+    param([Parameter(Mandatory)][string]$Path)
+    $null = fsutil objectid query $Path 2>&1
+    if ($LASTEXITCODE -ne 0) {
+        $null = fsutil objectid set $Path
+        if ($LASTEXITCODE -ne 0) { throw "Failed to set Object ID on $Path" }
+    }
+    Get-FileObjectId -Path $Path
+}
+
+function Get-FileObjectId {
+    <#
+    .SYNOPSIS
+        Reads the existing NTFS Object ID from a file and returns it as a [Guid].
+    .EXAMPLE
+        Get-FileObjectId C:\notes\todo.txt
+    #>
+    param([Parameter(Mandatory)][string]$Path)
+    $line = fsutil objectid query $Path | Select-String '^Object ID'
+    if (-not $line) { throw "No Object ID on $Path (use Set-FileObjectId first)" }
+    $hex = ($line.ToString() -split ':',2)[1].Trim()
+    ConvertTo-GuidFromHex $hex
+}
+
+function Resolve-FileObjectId {
+    <#
+    .SYNOPSIS
+        Looks up a file by its NTFS Object ID and returns its current path.
+    .EXAMPLE
+        $id = Set-FileObjectId C:\notes\todo.txt
+        # ...move the file anywhere on C:...
+        Resolve-FileObjectId $id
+    #>
+    param(
+        [Parameter(Mandatory)][Guid]$ObjectId,
+        [string]$Volume = 'C:'
+    )
+
+    $GENERIC_READ               = [uint32]2147483648
+    $FILE_SHARE_RW              = [uint32]3
+    $OPEN_EXISTING              = [uint32]3
+    $FILE_FLAG_BACKUP_SEMANTICS = [uint32]0x02000000
+
+    # Open the volume root as a directory hint — no admin required
+    $vol = [Win32.FileId]::CreateFileW("$Volume\",
+        [uint32]0, $FILE_SHARE_RW, [IntPtr]::Zero,
+        $OPEN_EXISTING, $FILE_FLAG_BACKUP_SEMANTICS, [IntPtr]::Zero)
+    if ($vol.IsInvalid) {
+        throw "CreateFileW failed: $([System.Runtime.InteropServices.Marshal]::GetLastWin32Error())"
+    }
+
+    $desc = New-Object Win32.FileId+FILE_ID_DESCRIPTOR
+    $desc.dwSize = [System.Runtime.InteropServices.Marshal]::SizeOf($desc)
+    $desc.Type = 1  # ObjectId
+    $desc.Id = $ObjectId
+
+    $h = [Win32.FileId]::OpenFileById($vol, [ref]$desc,
+        $GENERIC_READ, $FILE_SHARE_RW, [IntPtr]::Zero, $FILE_FLAG_BACKUP_SEMANTICS)
+    if ($h.IsInvalid) {
+        $err = [System.Runtime.InteropServices.Marshal]::GetLastWin32Error()
+        $vol.Dispose()
+        throw "OpenFileById failed: $err"
+    }
+
+    $sb = New-Object System.Text.StringBuilder 1024
+    [void][Win32.FileId]::GetFinalPathNameByHandleW($h, $sb, $sb.Capacity, 0)
+    $h.Dispose(); $vol.Dispose()
+
+    # Strip the \\?\ prefix that GetFinalPathNameByHandle prepends
+    $sb.ToString() -replace '^\\\\\?\\',''
+}
+
+Export-ModuleMember -Function Set-FileObjectId, Get-FileObjectId, Resolve-FileObjectId, ConvertTo-GuidFromHex
