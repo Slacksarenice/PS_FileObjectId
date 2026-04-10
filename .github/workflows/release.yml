@@ -72,6 +72,12 @@ jobs:
             -d SHA256 `
             -v Information
 
+      - name: Upload signed .nupkg as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: signed-nupkg
+          path: ${{ steps.package.outputs.nupkg_path }}
+
       - name: Create GitHub Release
         shell: pwsh
         env:
@@ -81,3 +87,22 @@ jobs:
             "${{ steps.package.outputs.nupkg_path }}" `
             --title "${{ github.ref_name }}" `
             --generate-notes
+
+  publish:
+    needs: release
+    runs-on: windows-latest
+    environment: PSGallery
+    steps:
+      - name: Download signed .nupkg
+        uses: actions/download-artifact@v4
+        with:
+          name: signed-nupkg
+
+      - name: Publish to PowerShell Gallery
+        shell: pwsh
+        run: |
+          $nupkg = Get-ChildItem -Filter '*.nupkg' | Select-Object -First 1
+          $moduleName = $nupkg.BaseName -replace '\.\d+\.\d+\.\d+$',''
+          $extractPath = Join-Path $env:RUNNER_TEMP $moduleName
+          Expand-Archive -Path $nupkg.FullName -DestinationPath $extractPath
+          Publish-Module -Path $extractPath -NuGetApiKey "${{ secrets.PSGALLERY_API_KEY }}" -Repository PSGallery
