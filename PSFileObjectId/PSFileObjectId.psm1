@@ -77,12 +77,16 @@ function Set-FileObjectId {
         https://github.com/Slacksarenice/PS_FileObjectId
     #>
     param([Parameter(Mandatory)][string]$Path)
-    $null = Get-FsutilObjectId -Path $Path 2>&1
-    if ($LASTEXITCODE -ne 0) {
-        $null = New-FsutilObjectId -Path $Path
-        if ($LASTEXITCODE -ne 0) { throw "Failed to create Object ID on $Path" }
+    $query = Get-FsutilObjectId -Path $Path 2>&1
+    if (-not ($query | Select-String '^Object ID')) {
+        $null = New-FsutilObjectId -Path $Path 2>&1
+        $query = Get-FsutilObjectId -Path $Path 2>&1
+        if (-not ($query | Select-String '^Object ID')) {
+            throw "Failed to create Object ID on $Path"
+        }
     }
-    Get-FileObjectId -Path $Path
+    $hex = (($query | Select-String '^Object ID').ToString() -split ':',2)[1].Trim()
+    ConvertTo-GuidFromHex $hex
 }
 
 function Get-FileObjectId {
