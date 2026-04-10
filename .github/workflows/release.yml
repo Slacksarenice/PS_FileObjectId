@@ -1,9 +1,8 @@
 name: Release
 
 on:
-  push:
-    tags:
-      - 'v*'
+  release:
+    types: [published]
 
 permissions:
   contents: write
@@ -17,10 +16,10 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Validate tag matches manifest version
+      - name: Validate release tag matches manifest version
         shell: pwsh
         run: |
-          $tagVersion = "${{ github.ref_name }}".TrimStart('v')
+          $tagVersion = "${{ github.event.release.tag_name }}".TrimStart('v')
           $manifest = Import-PowerShellDataFile ./FileObjectId/FileObjectId.psd1
           $moduleVersion = $manifest.ModuleVersion
           if ($tagVersion -ne $moduleVersion) {
@@ -55,8 +54,9 @@ jobs:
         with:
           subject-path: ${{ steps.package.outputs.nupkg_path }}
 
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
-        with:
-          generate_release_notes: true
-          files: ${{ steps.package.outputs.nupkg_path }}
+      - name: Upload .nupkg to release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release upload "${{ github.event.release.tag_name }}" "${{ steps.package.outputs.nupkg_path }}" --clobber
