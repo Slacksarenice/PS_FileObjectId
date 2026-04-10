@@ -7,7 +7,14 @@ on the drive.
 
 ## Install
 
-Drop the `FileObjectId` folder into one of your PowerShell module directories:
+### From GitHub
+
+```powershell
+git clone https://github.com/Slacksarenice/PS_FileObjectId.git
+```
+
+Then copy the `FileObjectId/` folder into one of your PowerShell module
+directories:
 
 - **PowerShell 7+:** `$HOME\Documents\PowerShell\Modules\FileObjectId\`
 - **Windows PowerShell 5.1:** `$HOME\Documents\WindowsPowerShell\Modules\FileObjectId\`
@@ -41,6 +48,22 @@ are per-volume, so you need to know which drive the file lives on.
 | `Get-FileObjectId -Path` | Return the existing Object ID as `[Guid]` |
 | `Resolve-FileObjectId -ObjectId [-Volume]` | Get the current path of a file by its ID |
 | `ConvertTo-GuidFromHex -Hex` | Convert a raw 32-char hex string (e.g. `fsutil` output) to `[Guid]` |
+
+## Testing
+
+Requires [Pester v5](https://pester.dev/).
+
+Run unit tests:
+
+```powershell
+Invoke-Pester ./Tests/ -ExcludeTag Integration
+```
+
+Run integration tests (requires a real NTFS volume):
+
+```powershell
+Invoke-Pester ./Tests/ -Tag Integration
+```
 
 ## Caveats
 
