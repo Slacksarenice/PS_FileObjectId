@@ -59,26 +59,17 @@ jobs:
           enable-AzPSSession: true
 
       - name: Sign .nupkg
-        uses: azure/artifact-signing-action@v1
-        with:
-          endpoint: ${{ secrets.SIGNING_ENDPOINT }}
-          signing-account-name: ${{ secrets.SIGNING_ACCOUNT_NAME }}
-          certificate-profile-name: ${{ secrets.SIGNING_CERTIFICATE_PROFILE }}
-          files: ${{ steps.package.outputs.nupkg_path }}
-          file-digest: SHA256
-          timestamp-rfc3161: http://timestamp.acs.microsoft.com
-          timestamp-digest: SHA256
-          # Only use AzurePowerShellCredential established by azure/login OIDC step
-          exclude-environment-credential: true
-          exclude-workload-identity-credential: true
-          exclude-managed-identity-credential: true
-          exclude-shared-token-cache-credential: true
-          exclude-visual-studio-credential: true
-          exclude-visual-studio-code-credential: true
-          exclude-azure-cli-credential: true
-          exclude-azure-powershell-credential: false
-          exclude-azure-developer-cli-credential: true
-          exclude-interactive-browser-credential: true
+        shell: pwsh
+        run: |
+          dotnet tool install --global sign --prerelease
+          sign code trusted-signing `
+            "${{ steps.package.outputs.nupkg_path }}" `
+            -tse "${{ secrets.SIGNING_ENDPOINT }}" `
+            -tsa "${{ secrets.SIGNING_ACCOUNT_NAME }}" `
+            -tscp "${{ secrets.SIGNING_CERTIFICATE_PROFILE }}" `
+            -t http://timestamp.acs.microsoft.com `
+            -d SHA256 `
+            -v Information
 
       - name: Upload .nupkg to release
         shell: pwsh
