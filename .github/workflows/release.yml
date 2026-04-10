@@ -98,11 +98,11 @@ jobs:
         with:
           name: signed-nupkg
 
-      - name: Publish to PowerShell Gallery
+      - name: Publish signed .nupkg to PowerShell Gallery
         shell: pwsh
         run: |
           $nupkg = Get-ChildItem -Filter '*.nupkg' | Select-Object -First 1
-          $moduleName = $nupkg.BaseName -replace '\.\d+\.\d+\.\d+$',''
-          $extractPath = Join-Path $env:RUNNER_TEMP $moduleName
-          Expand-Archive -Path $nupkg.FullName -DestinationPath $extractPath
-          Publish-Module -Path $extractPath -NuGetApiKey "${{ secrets.PSGALLERY_API_KEY }}" -Repository PSGallery
+          dotnet nuget push $nupkg.FullName `
+            --source "https://www.powershellgallery.com/api/v2/package" `
+            --api-key "${{ secrets.PSGALLERY_API_KEY }}" `
+            --skip-duplicate
