@@ -2,6 +2,8 @@
 
 Context for Claude Code when working in this repository.
 
+**GitHub:** <https://github.com/Slacksarenice/PS_FileObjectId>
+
 ## What this is
 
 `FileObjectId` is a small PowerShell module that tracks files by their NTFS
@@ -13,9 +15,11 @@ even after it's been moved or renamed anywhere on the same volume.
 ```
 FileObjectId/
     FileObjectId.psm1    # All module code (P/Invoke + functions)
-    FileObjectId.psd1    # Module manifest
-    README.md            # User-facing docs
-    CLAUDE.md            # This file
+    FileObjectId.psd1    # Module manifest (Author: Seth Miller)
+Tests/
+    FileObjectId.Tests.ps1  # Pester v5 tests
+README.md                # User-facing docs
+CLAUDE.md                # This file
 ```
 
 Single-file module by design. If it grows past ~10 functions, split into
@@ -36,7 +40,7 @@ adding or renaming functions.
 
 ## How it works
 
-1. **Assigning IDs** — `Set-FileObjectId` shells out to `fsutil objectid set`.
+1. **Assigning IDs** — `Set-FileObjectId` shells out to `fsutil objectid create`.
    `fsutil objectid query` is used to check whether one already exists.
 2. **Reading IDs** — `Get-FileObjectId` parses `fsutil objectid query` output.
    The hex string it prints is the raw on-disk byte order, which is exactly
@@ -66,17 +70,32 @@ adding or renaming functions.
   using the directory-handle hint. If you ever switch back to `\\.\$Volume`,
   the module will start failing with error 5 (`ERROR_ACCESS_DENIED`) for
   non-elevated users.
-- **fsutil GUID format.** `fsutil objectid set` takes four **undashed**
-  32-character hex strings, not standard dashed GUIDs. `fsutil objectid query`
-  prints them the same way. If you add any code that passes GUIDs to or
-  parses them from `fsutil`, strip/expect no dashes.
+- **fsutil GUID format.** `fsutil objectid create` auto-generates an Object ID
+  and requires no arguments beyond the file path. `fsutil objectid set` takes
+  four **undashed** 32-character hex strings, not standard dashed GUIDs.
+  `fsutil objectid query` prints them the same way. If you add any code that
+  passes GUIDs to or parses them from `fsutil`, strip/expect no dashes.
 - **Object IDs are per-volume.** They don't survive cross-volume moves,
   copies, or most restore operations. Don't add features that assume
   otherwise without a fallback (content hash, USN journal lookup, etc.).
 
 ## Testing
 
-No automated tests yet. Manual smoke test:
+### Pester tests
+
+Tests live in `Tests/FileObjectId.Tests.ps1` (Pester v5). Run unit tests:
+
+```powershell
+Invoke-Pester ./Tests/ -ExcludeTag Integration
+```
+
+Run integration tests (requires a real NTFS volume and may need admin):
+
+```powershell
+Invoke-Pester ./Tests/ -Tag Integration
+```
+
+### Manual smoke test
 
 ```powershell
 Import-Module .\FileObjectId\FileObjectId.psd1 -Force
@@ -91,9 +110,6 @@ Move-Item $f.FullName $newPath
 Resolve-FileObjectId $id   # should print $newPath
 Remove-Item $newPath
 ```
-
-If adding Pester tests later, put them in a `Tests/` folder at the module
-root and name them `*.Tests.ps1`.
 
 ## Versioning
 

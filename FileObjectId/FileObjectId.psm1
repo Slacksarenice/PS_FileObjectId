@@ -57,8 +57,8 @@ function Set-FileObjectId {
     param([Parameter(Mandatory)][string]$Path)
     $null = fsutil objectid query $Path 2>&1
     if ($LASTEXITCODE -ne 0) {
-        $null = fsutil objectid set $Path
-        if ($LASTEXITCODE -ne 0) { throw "Failed to set Object ID on $Path" }
+        $null = fsutil objectid create $Path
+        if ($LASTEXITCODE -ne 0) { throw "Failed to create Object ID on $Path" }
     }
     Get-FileObjectId -Path $Path
 }
