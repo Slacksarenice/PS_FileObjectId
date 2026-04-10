@@ -32,6 +32,13 @@ public static extern uint GetFinalPathNameByHandleW(
 '@
 }
 
+function ConvertFrom-ObjectIdLine {
+    # Private helper: parses the "Object ID : <hex>" line from fsutil output into a [Guid].
+    param([Parameter(Mandatory)]$Line)
+    $hex = ($Line.ToString() -split ':',2)[1].Trim()
+    ConvertTo-GuidFromHex $hex
+}
+
 function ConvertTo-GuidFromHex {
     <#
     .SYNOPSIS
@@ -78,15 +85,16 @@ function Set-FileObjectId {
     #>
     param([Parameter(Mandatory)][string]$Path)
     $query = Get-FsutilObjectId -Path $Path 2>&1
-    if (-not ($query | Select-String '^Object ID')) {
+    $match = $query | Select-String '^Object ID'
+    if (-not $match) {
         $null = New-FsutilObjectId -Path $Path 2>&1
         $query = Get-FsutilObjectId -Path $Path 2>&1
-        if (-not ($query | Select-String '^Object ID')) {
+        $match = $query | Select-String '^Object ID'
+        if (-not $match) {
             throw "Failed to create Object ID on $Path"
         }
     }
-    $hex = (($query | Select-String '^Object ID').ToString() -split ':',2)[1].Trim()
-    ConvertTo-GuidFromHex $hex
+    ConvertFrom-ObjectIdLine $match
 }
 
 function Get-FileObjectId {
@@ -108,8 +116,7 @@ function Get-FileObjectId {
     param([Parameter(Mandatory)][string]$Path)
     $line = Get-FsutilObjectId -Path $Path | Select-String '^Object ID'
     if (-not $line) { throw "No Object ID on $Path (use Set-FileObjectId first)" }
-    $hex = ($line.ToString() -split ':',2)[1].Trim()
-    ConvertTo-GuidFromHex $hex
+    ConvertFrom-ObjectIdLine $line
 }
 
 function Resolve-FileObjectId {
