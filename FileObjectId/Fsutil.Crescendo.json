@@ -1,0 +1,39 @@
+{
+    "$schema": "https://aka.ms/PowerShell/Crescendo/Schemas/2022-06",
+    "Commands": [
+        {
+            "Verb": "Get",
+            "Noun": "FsutilObjectId",
+            "OriginalName": "fsutil.exe",
+            "OriginalCommandElements": ["objectid", "query"],
+            "Description": "Query the NTFS Object ID of a file using fsutil objectid query.",
+            "Parameters": [
+                {
+                    "Name": "Path",
+                    "OriginalName": "",
+                    "ParameterType": "string",
+                    "Description": "Path to the file to query.",
+                    "Mandatory": true,
+                    "Position": 0
+                }
+            ]
+        },
+        {
+            "Verb": "New",
+            "Noun": "FsutilObjectId",
+            "OriginalName": "fsutil.exe",
+            "OriginalCommandElements": ["objectid", "create"],
+            "Description": "Create an NTFS Object ID on a file using fsutil objectid create.",
+            "Parameters": [
+                {
+                    "Name": "Path",
+                    "OriginalName": "",
+                    "ParameterType": "string",
+                    "Description": "Path to the file.",
+                    "Mandatory": true,
+                    "Position": 0
+                }
+            ]
+        }
+    ]
+}

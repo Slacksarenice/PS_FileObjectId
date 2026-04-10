@@ -37,7 +37,7 @@ function ConvertTo-GuidFromHex {
     .SYNOPSIS
         Converts a 32-character hex string (as printed by fsutil objectid) into a [Guid].
     #>
-    param([Parameter(Mandatory)][string]$Hex)
+    param([Parameter(Mandatory)][AllowEmptyString()][string]$Hex)
     $Hex = $Hex -replace '[^0-9a-fA-F]',''
     if ($Hex.Length -ne 32) { throw "Expected 32 hex chars, got $($Hex.Length)" }
     $bytes = [byte[]]::new(16)
@@ -55,9 +55,9 @@ function Set-FileObjectId {
         $id = Set-FileObjectId C:\notes\todo.txt
     #>
     param([Parameter(Mandatory)][string]$Path)
-    $null = fsutil objectid query $Path 2>&1
+    $null = Get-FsutilObjectId -Path $Path 2>&1
     if ($LASTEXITCODE -ne 0) {
-        $null = fsutil objectid create $Path
+        $null = New-FsutilObjectId -Path $Path
         if ($LASTEXITCODE -ne 0) { throw "Failed to create Object ID on $Path" }
     }
     Get-FileObjectId -Path $Path
@@ -71,7 +71,7 @@ function Get-FileObjectId {
         Get-FileObjectId C:\notes\todo.txt
     #>
     param([Parameter(Mandatory)][string]$Path)
-    $line = fsutil objectid query $Path | Select-String '^Object ID'
+    $line = Get-FsutilObjectId -Path $Path | Select-String '^Object ID'
     if (-not $line) { throw "No Object ID on $Path (use Set-FileObjectId first)" }
     $hex = ($line.ToString() -split ':',2)[1].Trim()
     ConvertTo-GuidFromHex $hex

@@ -1,0 +1,84 @@
+name: Release
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: write
+  id-token: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate release tag matches manifest version
+        shell: pwsh
+        run: |
+          $tagVersion = "${{ github.event.release.tag_name }}".TrimStart('v')
+          $manifest = Import-PowerShellDataFile ./FileObjectId/FileObjectId.psd1
+          $moduleVersion = $manifest.ModuleVersion
+          if ($tagVersion -ne $moduleVersion) {
+              throw "Tag version '$tagVersion' does not match ModuleVersion '$moduleVersion' in FileObjectId.psd1"
+          }
+          Write-Host "Version validated: $tagVersion"
+
+      - name: Run Pester unit tests
+        shell: pwsh
+        run: |
+          Install-Module Pester -MinimumVersion 5.0 -Force -Scope CurrentUser -SkipPublisherCheck
+          $result = Invoke-Pester ./Tests/ -ExcludeTag Integration -CI -PassThru
+          if ($result.FailedCount -gt 0) {
+              throw "$($result.FailedCount) test(s) failed"
+          }
+
+      - name: Package module as .nupkg
+        id: package
+        shell: pwsh
+        run: |
+          $repoPath = Join-Path $env:RUNNER_TEMP 'local-repo'
+          New-Item -Path $repoPath -ItemType Directory -Force | Out-Null
+          Register-PSRepository -Name LocalRepo -SourceLocation $repoPath -InstallationPolicy Trusted
+          Publish-Module -Path ./FileObjectId -Repository LocalRepo
+          $nupkg = Get-ChildItem $repoPath -Filter '*.nupkg' | Select-Object -First 1
+          Write-Host "Packaged: $($nupkg.Name)"
+          "nupkg_path=$($nupkg.FullName)" >> $env:GITHUB_OUTPUT
+
+      - name: Azure login
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Sign .nupkg
+        uses: azure/artifact-signing-action@v1
+        with:
+          endpoint: ${{ secrets.SIGNING_ENDPOINT }}
+          signing-account-name: ${{ secrets.SIGNING_ACCOUNT_NAME }}
+          certificate-profile-name: ${{ secrets.SIGNING_CERTIFICATE_PROFILE }}
+          files: ${{ steps.package.outputs.nupkg_path }}
+          file-digest: SHA256
+          timestamp-rfc3161: http://timestamp.acs.microsoft.com
+          timestamp-digest: SHA256
+          # Only use AzureCliCredential established by azure/login OIDC step
+          exclude-environment-credential: true
+          exclude-workload-identity-credential: true
+          exclude-managed-identity-credential: true
+          exclude-shared-token-cache-credential: true
+          exclude-visual-studio-credential: true
+          exclude-visual-studio-code-credential: true
+          exclude-azure-cli-credential: false
+          exclude-azure-powershell-credential: true
+          exclude-azure-developer-cli-credential: true
+          exclude-interactive-browser-credential: true
+
+      - name: Upload .nupkg to release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release upload "${{ github.event.release.tag_name }}" "${{ steps.package.outputs.nupkg_path }}" --clobber

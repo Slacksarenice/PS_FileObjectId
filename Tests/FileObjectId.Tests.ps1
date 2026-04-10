@@ -39,9 +39,7 @@ Describe 'ConvertTo-GuidFromHex' {
 
 Describe 'Get-FileObjectId' {
     It 'Returns the correct Guid from fsutil query output' {
-        Mock fsutil { $fsutilQueryOutput } -ParameterFilter {
-            $args[0] -eq 'objectid' -and $args[1] -eq 'query'
-        }
+        Mock Get-FsutilObjectId { $fsutilQueryOutput } -ModuleName FileObjectId
 
         $result = Get-FileObjectId -Path $testPath
         $result | Should -BeOfType [Guid]
@@ -49,9 +47,7 @@ Describe 'Get-FileObjectId' {
     }
 
     It 'Throws when fsutil returns no Object ID line' {
-        Mock fsutil { 'Error: The file or directory is not reparse point.' } -ParameterFilter {
-            $args[0] -eq 'objectid' -and $args[1] -eq 'query'
-        }
+        Mock Get-FsutilObjectId { 'Error: The file or directory is not reparse point.' } -ModuleName FileObjectId
 
         { Get-FileObjectId -Path $testPath } | Should -Throw '*No Object ID*'
     }
@@ -59,23 +55,21 @@ Describe 'Get-FileObjectId' {
 
 Describe 'Set-FileObjectId' {
     It 'Returns existing ID when file already has one' {
-        Mock fsutil {
+        Mock Get-FsutilObjectId {
             $global:LASTEXITCODE = 0
             $fsutilQueryOutput
-        } -ParameterFilter { $args[0] -eq 'objectid' -and $args[1] -eq 'query' }
+        } -ModuleName FileObjectId
 
         $result = Set-FileObjectId -Path $testPath
         $result | Should -BeOfType [Guid]
         $result | Should -Be $testGuid
-        Should -Invoke fsutil -Exactly 2 -ParameterFilter {
-            $args[0] -eq 'objectid' -and $args[1] -eq 'query'
-        }
+        Should -Invoke Get-FsutilObjectId -Exactly 2 -ModuleName FileObjectId
     }
 
     It 'Creates an ID when file has none, then returns it' {
         $script:queryCallCount = 0
 
-        Mock fsutil {
+        Mock Get-FsutilObjectId {
             $script:queryCallCount++
             if ($script:queryCallCount -eq 1) {
                 $global:LASTEXITCODE = 1
@@ -84,17 +78,15 @@ Describe 'Set-FileObjectId' {
                 $global:LASTEXITCODE = 0
                 $fsutilQueryOutput
             }
-        } -ParameterFilter { $args[0] -eq 'objectid' -and $args[1] -eq 'query' }
+        } -ModuleName FileObjectId
 
-        Mock fsutil {
+        Mock New-FsutilObjectId {
             $global:LASTEXITCODE = 0
-        } -ParameterFilter { $args[0] -eq 'objectid' -and $args[1] -eq 'create' }
+        } -ModuleName FileObjectId
 
         $result = Set-FileObjectId -Path $testPath
         $result | Should -BeOfType [Guid]
-        Should -Invoke fsutil -Exactly 1 -ParameterFilter {
-            $args[0] -eq 'objectid' -and $args[1] -eq 'create'
-        }
+        Should -Invoke New-FsutilObjectId -Exactly 1 -ModuleName FileObjectId
     }
 }
 
