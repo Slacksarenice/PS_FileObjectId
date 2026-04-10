@@ -87,22 +87,6 @@ Run integration tests (requires a real NTFS volume):
 Invoke-Pester ./Tests/ -Tag Integration
 ```
 
-## Releasing
-
-Releases are automated via GitHub Actions. To publish a new version:
-
-1. Bump `ModuleVersion` in `PSFileObjectId/PSFileObjectId.psd1`
-2. Merge the change to `main`
-3. Push an annotated tag: `git tag -a v1.2.3 -m "Release v1.2.3" && git push origin v1.2.3`
-
-The workflow will:
-- Validate the tag matches the manifest version
-- Run Pester unit tests
-- Package the module as a `.nupkg`
-- Sign the package with Azure Trusted Signing
-- Create a GitHub Release with the signed `.nupkg` attached
-- Publish the signed package to the PowerShell Gallery
-
 ## Caveats
 
 - NTFS only. ReFS and FAT don't support Object IDs.
