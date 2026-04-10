@@ -1,4 +1,4 @@
-# FileObjectId.psm1
+# PSFileObjectId.psm1
 # Track files by NTFS Object ID so you can find them after they're moved
 # or renamed anywhere on the same volume.
 
@@ -36,6 +36,19 @@ function ConvertTo-GuidFromHex {
     <#
     .SYNOPSIS
         Converts a 32-character hex string (as printed by fsutil objectid) into a [Guid].
+    .DESCRIPTION
+        Takes a raw 32-character hex string in the byte order used by fsutil objectid
+        query and converts it to a [Guid]. Dashes, spaces, and other non-hex characters
+        are stripped before conversion.
+    .PARAMETER Hex
+        A 32-character hexadecimal string. Dashes and spaces are allowed and will be
+        stripped automatically.
+    .EXAMPLE
+        ConvertTo-GuidFromHex '0102030405060708090a0b0c0d0e0f10'
+    .OUTPUTS
+        [Guid]
+    .LINK
+        https://github.com/Slacksarenice/PS_FileObjectId
     #>
     param([Parameter(Mandatory)][AllowEmptyString()][string]$Hex)
     $Hex = $Hex -replace '[^0-9a-fA-F]',''
@@ -51,8 +64,17 @@ function Set-FileObjectId {
     <#
     .SYNOPSIS
         Ensures a file has an NTFS Object ID, creating one if needed, and returns it.
+    .DESCRIPTION
+        Checks whether the file already has an NTFS Object ID. If not, creates one
+        using fsutil objectid create. Returns the Object ID as a [Guid] either way.
+    .PARAMETER Path
+        Path to the file to assign an Object ID to.
     .EXAMPLE
         $id = Set-FileObjectId C:\notes\todo.txt
+    .OUTPUTS
+        [Guid]
+    .LINK
+        https://github.com/Slacksarenice/PS_FileObjectId
     #>
     param([Parameter(Mandatory)][string]$Path)
     $null = Get-FsutilObjectId -Path $Path 2>&1
@@ -67,8 +89,17 @@ function Get-FileObjectId {
     <#
     .SYNOPSIS
         Reads the existing NTFS Object ID from a file and returns it as a [Guid].
+    .DESCRIPTION
+        Queries the file's NTFS Object ID using fsutil objectid query. Throws if
+        the file has no Object ID assigned. Use Set-FileObjectId to assign one first.
+    .PARAMETER Path
+        Path to the file to query.
     .EXAMPLE
         Get-FileObjectId C:\notes\todo.txt
+    .OUTPUTS
+        [Guid]
+    .LINK
+        https://github.com/Slacksarenice/PS_FileObjectId
     #>
     param([Parameter(Mandatory)][string]$Path)
     $line = Get-FsutilObjectId -Path $Path | Select-String '^Object ID'
@@ -81,10 +112,26 @@ function Resolve-FileObjectId {
     <#
     .SYNOPSIS
         Looks up a file by its NTFS Object ID and returns its current path.
+    .DESCRIPTION
+        Opens the volume root as a directory handle, then uses OpenFileById to
+        locate the file by its Object ID. Returns the file's current full path.
+        No admin privileges are required.
+    .PARAMETER ObjectId
+        The NTFS Object ID to look up, as a [Guid].
+    .PARAMETER Volume
+        The volume to search. Defaults to 'C:'. Object IDs are per-volume, so
+        you must specify the correct drive.
     .EXAMPLE
         $id = Set-FileObjectId C:\notes\todo.txt
-        # ...move the file anywhere on C:...
+        Move-Item C:\notes\todo.txt C:\archive\todo.txt
         Resolve-FileObjectId $id
+        # Returns: C:\archive\todo.txt
+    .EXAMPLE
+        Resolve-FileObjectId $id -Volume D:
+    .OUTPUTS
+        [String]
+    .LINK
+        https://github.com/Slacksarenice/PS_FileObjectId
     #>
     param(
         [Parameter(Mandatory)][Guid]$ObjectId,

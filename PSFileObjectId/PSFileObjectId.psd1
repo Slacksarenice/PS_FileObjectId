@@ -1,7 +1,7 @@
 @{
-    RootModule        = 'FileObjectId.psm1'
+    RootModule        = 'PSFileObjectId.psm1'
     NestedModules     = @('Fsutil.psm1')
-    ModuleVersion     = '1.0.7'
+    ModuleVersion     = '1.0.8'
     GUID              = 'a7f3c2e1-4b8d-4e9a-9c6f-1d2e3f4a5b6c'
     Author            = 'Seth Miller'
     Description       = 'Track files by NTFS Object ID so they can be found after being moved or renamed on the same volume.'
@@ -13,6 +13,7 @@
     PrivateData = @{
         PSData = @{
             Tags = @('NTFS','ObjectId','FileSystem','Windows')
+            LicenseUri = 'https://github.com/Slacksarenice/PS_FileObjectId/blob/main/LICENSE'
             ProjectUri = 'https://github.com/Slacksarenice/PS_FileObjectId'
         }
     }
