@@ -15,6 +15,20 @@ class CrescendoNativeError : System.Exception {
 
 # Returns available errors
 # Assumes that we are being called from within a script cmdlet when EmitAsError is used.
+function Push-CrescendoNativeError {
+param([Parameter(ValueFromPipeline)]$obj)
+    BEGIN { }
+    PROCESS {
+        if ($obj -is [System.Management.Automation.ErrorRecord]) {
+            $__CrescendoNativeErrorQueue.Enqueue($obj.Exception.Message)
+        }
+        else {
+            $obj
+        }
+    }
+    END { }
+}
+
 function Pop-CrescendoNativeError {
 param ([switch]$EmitAsError)
     while ($__CrescendoNativeErrorQueue.Count -gt 0) {
