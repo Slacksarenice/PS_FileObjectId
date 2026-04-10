@@ -6,24 +6,39 @@ Context for Claude Code when working in this repository.
 
 ## What this is
 
-`FileObjectId` is a small PowerShell module that tracks files by their NTFS
+`PSFileObjectId` is a small PowerShell module that tracks files by their NTFS
 Object ID. The goal: once a file is registered, you can find it again by ID
 even after it's been moved or renamed anywhere on the same volume.
 
 ## Layout
 
 ```
-FileObjectId/
-    FileObjectId.psm1    # All module code (P/Invoke + functions)
-    FileObjectId.psd1    # Module manifest (Author: Seth Miller)
+PSFileObjectId/
+    PSFileObjectId.psm1      # Main module code (P/Invoke + functions)
+    PSFileObjectId.psd1      # Module manifest (Author: Seth Miller)
+    Fsutil.Crescendo.json    # Crescendo config for fsutil wrappers (build-time source)
+    Fsutil.psm1              # Generated Crescendo wrappers (NestedModule)
 Tests/
-    FileObjectId.Tests.ps1  # Pester v5 tests
-README.md                # User-facing docs
-CLAUDE.md                # This file
+    FileObjectId.Tests.ps1   # Pester v5 tests
+.github/
+    workflows/
+        release.yml          # Tag-triggered release workflow
+README.md                    # User-facing docs
+CLAUDE.md                    # This file
+LICENSE                      # MIT license
 ```
 
-Single-file module by design. If it grows past ~10 functions, split into
-`Public/` and `Private/` subfolders and have the `.psm1` dot-source them.
+The module uses Crescendo-generated wrappers (`Get-FsutilObjectId`,
+`New-FsutilObjectId`) for `fsutil objectid` subcommands. These are loaded
+as a `NestedModules` entry in the manifest and are internal — not exported
+to users. This makes the fsutil calls mockable by Pester.
+
+To regenerate the wrappers after editing `Fsutil.Crescendo.json`:
+
+```powershell
+Install-Module Microsoft.PowerShell.Crescendo -Force
+Export-CrescendoModule -ConfigurationFile ./PSFileObjectId/Fsutil.Crescendo.json -ModuleName ./PSFileObjectId/Fsutil.psm1 -Force
+```
 
 ## Public commands
 
@@ -36,16 +51,18 @@ Single-file module by design. If it grows past ~10 functions, split into
 
 All four are listed in `FunctionsToExport` in the manifest and in
 `Export-ModuleMember` at the bottom of the `.psm1`. Keep those in sync when
-adding or renaming functions.
+adding or renaming functions. Do not add the Crescendo wrapper functions
+(`Get-FsutilObjectId`, `New-FsutilObjectId`) to `FunctionsToExport`.
 
 ## How it works
 
-1. **Assigning IDs** — `Set-FileObjectId` shells out to `fsutil objectid create`.
-   `fsutil objectid query` is used to check whether one already exists.
-2. **Reading IDs** — `Get-FileObjectId` parses `fsutil objectid query` output.
-   The hex string it prints is the raw on-disk byte order, which is exactly
-   what `[Guid]::new([byte[]])` expects (little-endian for the first three
-   fields), so no manual byte swapping is needed.
+1. **Assigning IDs** — `Set-FileObjectId` calls `Get-FsutilObjectId` (which
+   wraps `fsutil objectid query`) to check whether one exists, then
+   `New-FsutilObjectId` (which wraps `fsutil objectid create`) if not.
+2. **Reading IDs** — `Get-FileObjectId` calls `Get-FsutilObjectId` and parses
+   the output. The hex string it prints is the raw on-disk byte order, which
+   is exactly what `[Guid]::new([byte[]])` expects (little-endian for the
+   first three fields), so no manual byte swapping is needed.
 3. **Resolving IDs to paths** — `Resolve-FileObjectId` uses P/Invoke against
    `kernel32.dll`:
    - `CreateFileW` opens the volume root (`C:\`) as a *directory handle*
@@ -78,6 +95,12 @@ adding or renaming functions.
 - **Object IDs are per-volume.** They don't survive cross-volume moves,
   copies, or most restore operations. Don't add features that assume
   otherwise without a fallback (content hash, USN journal lookup, etc.).
+- **Crescendo wrapper completeness.** The generated `Fsutil.psm1` must
+  include `Push-CrescendoNativeError`. If regenerating from the JSON config,
+  verify this function is present — some Crescendo versions omit it.
+- **Pester mocking scope.** Tests must use `-ModuleName PSFileObjectId` on
+  `Mock` and `Should -Invoke` calls for the Crescendo wrappers, since
+  they are internal (not exported) functions called within the module scope.
 
 ## Testing
 
@@ -98,11 +121,10 @@ Invoke-Pester ./Tests/ -Tag Integration
 ### Manual smoke test
 
 ```powershell
-Import-Module .\FileObjectId\FileObjectId.psd1 -Force
+Import-Module .\PSFileObjectId\PSFileObjectId.psd1 -Force
 
 $f = New-TemporaryFile
 $id = Set-FileObjectId $f.FullName
-$id | Should-Be-Guid
 
 $newPath = Join-Path $env:TEMP "moved-$(Get-Random).tmp"
 Move-Item $f.FullName $newPath
@@ -111,11 +133,25 @@ Resolve-FileObjectId $id   # should print $newPath
 Remove-Item $newPath
 ```
 
+## Releasing
+
+Releases are automated via GitHub Actions (`.github/workflows/release.yml`).
+
+1. Bump `ModuleVersion` in `PSFileObjectId/PSFileObjectId.psd1`
+2. Merge the change to `main` via PR
+3. Push an annotated tag: `git tag -a v1.2.3 -m "Release v1.2.3" && git push origin v1.2.3`
+
+The workflow runs two jobs:
+- **release** (Azure-Runners environment): validate version, run tests,
+  package `.nupkg`, sign with Azure Trusted Signing, create GitHub Release
+- **publish** (PSGallery environment): push the signed `.nupkg` to
+  PowerShell Gallery
+
 ## Versioning
 
-Manifest version is `1.0.0`. Bump `ModuleVersion` in `FileObjectId.psd1`
-on any user-visible change. Patch for bugfixes, minor for new functions,
-major for breaking changes to existing function signatures.
+Bump `ModuleVersion` in `PSFileObjectId.psd1` on any user-visible change.
+Patch for bugfixes, minor for new functions, major for breaking changes
+to existing function signatures.
 
 ## Out of scope
 

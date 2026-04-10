@@ -23,7 +23,7 @@ jobs:
         shell: pwsh
         run: |
           $tagVersion = "${{ github.ref_name }}".TrimStart('v')
-          $manifest = Import-PowerShellDataFile ./FileObjectId/FileObjectId.psd1
+          $manifest = Import-PowerShellDataFile ./PSFileObjectId/PSFileObjectId.psd1
           $moduleVersion = $manifest.ModuleVersion
           if ($tagVersion -ne $moduleVersion) {
               throw "Tag version '$tagVersion' does not match ModuleVersion '$moduleVersion' in FileObjectId.psd1"
@@ -46,7 +46,7 @@ jobs:
           $repoPath = Join-Path $env:RUNNER_TEMP 'local-repo'
           New-Item -Path $repoPath -ItemType Directory -Force | Out-Null
           Register-PSRepository -Name LocalRepo -SourceLocation $repoPath -InstallationPolicy Trusted
-          Publish-Module -Path ./FileObjectId -Repository LocalRepo
+          Publish-Module -Path ./PSFileObjectId -Repository LocalRepo
           $nupkg = Get-ChildItem $repoPath -Filter '*.nupkg' | Select-Object -First 1
           Write-Host "Packaged: $($nupkg.Name)"
           "nupkg_path=$($nupkg.FullName)" >> $env:GITHUB_OUTPUT
