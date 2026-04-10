@@ -105,11 +105,11 @@ Describe 'Set-FileObjectId' {
 
         Mock fsutil {
             $global:LASTEXITCODE = 0
-        } -ParameterFilter { $args[0] -eq 'objectid' -and $args[1] -eq 'set' }
+        } -ParameterFilter { $args[0] -eq 'objectid' -and $args[1] -eq 'create' }
 
         $result = Set-FileObjectId -Path $testPath
         $result | Should -BeOfType [Guid]
-        Should -Invoke fsutil -Times 1 -Exactly -ParameterFilter { $args[0] -eq 'objectid' -and $args[1] -eq 'set' }
+        Should -Invoke fsutil -Times 1 -Exactly -ParameterFilter { $args[0] -eq 'objectid' -and $args[1] -eq 'create' }
     }
 }
 
