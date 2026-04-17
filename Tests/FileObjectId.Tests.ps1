@@ -89,6 +89,7 @@ Describe 'Set-FileObjectId' {
 Describe 'Resolve-FileObjectId' -Tag 'Integration' {
     It 'Resolves a moved file by its Object ID' {
         $tempFile = New-TemporaryFile
+        $newPath = $null
         try {
             $id = Set-FileObjectId -Path $tempFile.FullName
             $id | Should -BeOfType [Guid]
@@ -97,9 +98,14 @@ Describe 'Resolve-FileObjectId' -Tag 'Integration' {
             Move-Item $tempFile.FullName $newPath
 
             $resolved = Resolve-FileObjectId -ObjectId $id
-            $resolved | Should -Be $newPath
+            # Compare by file identity rather than exact string, because $env:TEMP may
+            # contain 8.3 short-name segments while GetFinalPathNameByHandleW always
+            # returns the long-name form.
+            Test-Path $resolved | Should -BeTrue
+            [System.IO.Path]::GetFileName($resolved) | Should -Be ([System.IO.Path]::GetFileName($newPath))
+            (Get-Item $resolved).Length | Should -Be (Get-Item $newPath).Length
         } finally {
-            if (Test-Path $newPath) { Remove-Item $newPath -Force }
+            if ($newPath -and (Test-Path $newPath)) { Remove-Item $newPath -Force }
             if (Test-Path $tempFile.FullName) { Remove-Item $tempFile.FullName -Force }
         }
     }

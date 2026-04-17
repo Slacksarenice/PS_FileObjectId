@@ -39,6 +39,20 @@ function ConvertFrom-ObjectIdLine {
     ConvertTo-GuidFromHex $hex
 }
 
+function Get-FsutilErrorDetail {
+    # Private helper: the Crescendo wrappers swallow fsutil's stderr into an
+    # unread queue, so re-invoke fsutil directly to recover the error text.
+    # Returns ": <detail>" for use as a throw-message suffix, or $Fallback
+    # if fsutil produced no output.
+    param(
+        [Parameter(Mandatory)][string]$Verb,
+        [Parameter(Mandatory)][string]$Path,
+        [string]$Fallback = ''
+    )
+    $detail = (& fsutil.exe objectid $Verb $Path 2>&1 | Out-String).Trim()
+    if ($detail) { ": $detail" } else { $Fallback }
+}
+
 function ConvertTo-GuidFromHex {
     <#
     .SYNOPSIS
@@ -91,7 +105,7 @@ function Set-FileObjectId {
         $query = Get-FsutilObjectId -Path $Path 2>&1
         $match = $query | Select-String '^Object ID'
         if (-not $match) {
-            throw "Failed to create Object ID on $Path"
+            throw "Failed to create Object ID on '$Path'$(Get-FsutilErrorDetail -Verb create -Path $Path)"
         }
     }
     ConvertFrom-ObjectIdLine $match
@@ -114,8 +128,10 @@ function Get-FileObjectId {
         https://github.com/Slacksarenice/PS_FileObjectId
     #>
     param([Parameter(Mandatory)][string]$Path)
-    $line = Get-FsutilObjectId -Path $Path | Select-String '^Object ID'
-    if (-not $line) { throw "No Object ID on $Path (use Set-FileObjectId first)" }
+    $line = Get-FsutilObjectId -Path $Path 2>&1 | Select-String '^Object ID'
+    if (-not $line) {
+        throw "No Object ID on '$Path'$(Get-FsutilErrorDetail -Verb query -Path $Path -Fallback ' (use Set-FileObjectId first)')"
+    }
     ConvertFrom-ObjectIdLine $line
 }
 
@@ -159,28 +175,50 @@ function Resolve-FileObjectId {
         [uint32]0, $FILE_SHARE_RW, [IntPtr]::Zero,
         $OPEN_EXISTING, $FILE_FLAG_BACKUP_SEMANTICS, [IntPtr]::Zero)
     if ($vol.IsInvalid) {
-        throw "CreateFileW failed: $([System.Runtime.InteropServices.Marshal]::GetLastWin32Error())"
-    }
-
-    $desc = New-Object Win32.FileId+FILE_ID_DESCRIPTOR
-    $desc.dwSize = [System.Runtime.InteropServices.Marshal]::SizeOf($desc)
-    $desc.Type = 1  # ObjectId
-    $desc.Id = $ObjectId
-
-    $h = [Win32.FileId]::OpenFileById($vol, [ref]$desc,
-        $GENERIC_READ, $FILE_SHARE_RW, [IntPtr]::Zero, $FILE_FLAG_BACKUP_SEMANTICS)
-    if ($h.IsInvalid) {
         $err = [System.Runtime.InteropServices.Marshal]::GetLastWin32Error()
         $vol.Dispose()
-        throw "OpenFileById failed: $err"
+        throw "CreateFileW failed: $err"
     }
 
-    $sb = New-Object System.Text.StringBuilder 1024
-    [void][Win32.FileId]::GetFinalPathNameByHandleW($h, $sb, $sb.Capacity, 0)
-    $h.Dispose(); $vol.Dispose()
+    try {
+        $desc = New-Object Win32.FileId+FILE_ID_DESCRIPTOR
+        $desc.dwSize = [System.Runtime.InteropServices.Marshal]::SizeOf($desc)
+        $desc.Type = 1  # ObjectId
+        $desc.Id = $ObjectId
 
-    # Strip the \\?\ prefix that GetFinalPathNameByHandle prepends
-    $sb.ToString() -replace '^\\\\\?\\',''
+        $h = [Win32.FileId]::OpenFileById($vol, [ref]$desc,
+            $GENERIC_READ, $FILE_SHARE_RW, [IntPtr]::Zero, $FILE_FLAG_BACKUP_SEMANTICS)
+        if ($h.IsInvalid) {
+            $err = [System.Runtime.InteropServices.Marshal]::GetLastWin32Error()
+            $h.Dispose()
+            throw "OpenFileById failed: $err"
+        }
+
+        try {
+            # 1024 handles most paths; grow once if the full path is longer (up to 32767).
+            $sb = New-Object System.Text.StringBuilder 1024
+            $written = [Win32.FileId]::GetFinalPathNameByHandleW($h, $sb, $sb.Capacity, 0)
+            if ($written -eq 0) {
+                $err = [System.Runtime.InteropServices.Marshal]::GetLastWin32Error()
+                throw "GetFinalPathNameByHandleW failed: $err"
+            }
+            if ($written -ge $sb.Capacity) {
+                $sb = New-Object System.Text.StringBuilder ($written + 1)
+                $written = [Win32.FileId]::GetFinalPathNameByHandleW($h, $sb, $sb.Capacity, 0)
+                if ($written -eq 0 -or $written -ge $sb.Capacity) {
+                    $err = [System.Runtime.InteropServices.Marshal]::GetLastWin32Error()
+                    throw "GetFinalPathNameByHandleW failed after resize: $err"
+                }
+            }
+
+            # Strip the \\?\ prefix that GetFinalPathNameByHandle prepends
+            $sb.ToString() -replace '^\\\\\?\\',''
+        } finally {
+            $h.Dispose()
+        }
+    } finally {
+        $vol.Dispose()
+    }
 }
 
 Export-ModuleMember -Function Set-FileObjectId, Get-FileObjectId, Resolve-FileObjectId, ConvertTo-GuidFromHex
