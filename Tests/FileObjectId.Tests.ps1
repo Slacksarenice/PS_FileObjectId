@@ -98,12 +98,11 @@ Describe 'Resolve-FileObjectId' -Tag 'Integration' {
             Move-Item $tempFile.FullName $newPath
 
             $resolved = Resolve-FileObjectId -ObjectId $id
-            # Compare by file identity rather than exact string, because $env:TEMP may
-            # contain 8.3 short-name segments while GetFinalPathNameByHandleW always
-            # returns the long-name form.
+            # Compare by Object ID rather than path string: path normalization can
+            # differ (for example, 8.3 short-name segments vs. long-name form), and
+            # the Object ID is the strongest identity check available here anyway.
             Test-Path $resolved | Should -BeTrue
-            [System.IO.Path]::GetFileName($resolved) | Should -Be ([System.IO.Path]::GetFileName($newPath))
-            (Get-Item $resolved).Length | Should -Be (Get-Item $newPath).Length
+            Get-FileObjectId -Path $resolved | Should -Be $id
         } finally {
             if ($newPath -and (Test-Path $newPath)) { Remove-Item $newPath -Force }
             if (Test-Path $tempFile.FullName) { Remove-Item $tempFile.FullName -Force }

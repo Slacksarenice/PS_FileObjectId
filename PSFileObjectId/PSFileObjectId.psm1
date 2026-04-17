@@ -42,15 +42,18 @@ function ConvertFrom-ObjectIdLine {
 function Get-FsutilErrorDetail {
     # Private helper: the Crescendo wrappers swallow fsutil's stderr into an
     # unread queue, so re-invoke fsutil directly to recover the error text.
-    # Returns ": <detail>" for use as a throw-message suffix, or $Fallback
-    # if fsutil produced no output.
+    # Always uses the read-only `query` verb so repeating the call can't
+    # mutate state. Returns ": <first non-empty line>" for use as a
+    # throw-message suffix, or $Fallback if fsutil produced no output.
     param(
-        [Parameter(Mandatory)][string]$Verb,
         [Parameter(Mandatory)][string]$Path,
         [string]$Fallback = ''
     )
-    $detail = (& fsutil.exe objectid $Verb $Path 2>&1 | Out-String).Trim()
-    if ($detail) { ": $detail" } else { $Fallback }
+    $firstLine = & fsutil.exe objectid query $Path 2>&1 |
+        ForEach-Object { $_.ToString().Trim() } |
+        Where-Object { $_ } |
+        Select-Object -First 1
+    if ($firstLine) { ": $firstLine" } else { $Fallback }
 }
 
 function ConvertTo-GuidFromHex {
@@ -105,7 +108,7 @@ function Set-FileObjectId {
         $query = Get-FsutilObjectId -Path $Path 2>&1
         $match = $query | Select-String '^Object ID'
         if (-not $match) {
-            throw "Failed to create Object ID on '$Path'$(Get-FsutilErrorDetail -Verb create -Path $Path)"
+            throw "Failed to create Object ID on '$Path'$(Get-FsutilErrorDetail -Path $Path)"
         }
     }
     ConvertFrom-ObjectIdLine $match
@@ -130,7 +133,7 @@ function Get-FileObjectId {
     param([Parameter(Mandatory)][string]$Path)
     $line = Get-FsutilObjectId -Path $Path 2>&1 | Select-String '^Object ID'
     if (-not $line) {
-        throw "No Object ID on '$Path'$(Get-FsutilErrorDetail -Verb query -Path $Path -Fallback ' (use Set-FileObjectId first)')"
+        throw "No Object ID on '$Path'$(Get-FsutilErrorDetail -Path $Path -Fallback ' (use Set-FileObjectId first)')"
     }
     ConvertFrom-ObjectIdLine $line
 }
