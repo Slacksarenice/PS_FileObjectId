@@ -46,9 +46,14 @@ function Get-FsutilErrorDetail {
     # mutate state. Returns the first non-empty line of fsutil output, or
     # $null if fsutil produced nothing or couldn't be invoked. Callers own
     # the formatting of the result into their error message.
+    #
+    # Uses a fully-qualified System32 path rather than a PATH lookup so a
+    # rogue fsutil.exe earlier in PATH or the working directory can't be
+    # substituted for the system binary.
     param([Parameter(Mandatory)][string]$Path)
+    $fsutil = Join-Path $env:SystemRoot 'System32\fsutil.exe'
     try {
-        & fsutil.exe objectid query $Path 2>&1 |
+        & $fsutil objectid query $Path 2>&1 |
             ForEach-Object { $_.ToString().Trim() } |
             Where-Object { $_ } |
             Select-Object -First 1
