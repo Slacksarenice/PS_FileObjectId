@@ -43,17 +43,18 @@ function Get-FsutilErrorDetail {
     # Private helper: the Crescendo wrappers swallow fsutil's stderr into an
     # unread queue, so re-invoke fsutil directly to recover the error text.
     # Always uses the read-only `query` verb so repeating the call can't
-    # mutate state. Returns ": <first non-empty line>" for use as a
-    # throw-message suffix, or $Fallback if fsutil produced no output.
-    param(
-        [Parameter(Mandatory)][string]$Path,
-        [string]$Fallback = ''
-    )
-    $firstLine = & fsutil.exe objectid query $Path 2>&1 |
-        ForEach-Object { $_.ToString().Trim() } |
-        Where-Object { $_ } |
-        Select-Object -First 1
-    if ($firstLine) { ": $firstLine" } else { $Fallback }
+    # mutate state. Returns the first non-empty line of fsutil output, or
+    # $null if fsutil produced nothing or couldn't be invoked. Callers own
+    # the formatting of the result into their error message.
+    param([Parameter(Mandatory)][string]$Path)
+    try {
+        & fsutil.exe objectid query $Path 2>&1 |
+            ForEach-Object { $_.ToString().Trim() } |
+            Where-Object { $_ } |
+            Select-Object -First 1
+    } catch {
+        $null
+    }
 }
 
 function ConvertTo-GuidFromHex {
@@ -108,7 +109,9 @@ function Set-FileObjectId {
         $query = Get-FsutilObjectId -Path $Path 2>&1
         $match = $query | Select-String '^Object ID'
         if (-not $match) {
-            throw "Failed to create Object ID on '$Path'$(Get-FsutilErrorDetail -Path $Path)"
+            $detail = Get-FsutilErrorDetail -Path $Path
+            $suffix = if ($detail) { ": $detail" } else { '' }
+            throw "Failed to create Object ID on '$Path'$suffix"
         }
     }
     ConvertFrom-ObjectIdLine $match
@@ -133,7 +136,14 @@ function Get-FileObjectId {
     param([Parameter(Mandatory)][string]$Path)
     $line = Get-FsutilObjectId -Path $Path 2>&1 | Select-String '^Object ID'
     if (-not $line) {
-        throw "No Object ID on '$Path'$(Get-FsutilErrorDetail -Path $Path -Fallback ' (use Set-FileObjectId first)')"
+        $detail = Get-FsutilErrorDetail -Path $Path
+        # "The specified file has no object id" is fsutil's way of telling us the
+        # file exists but lacks an ID — redirect the user to Set-FileObjectId.
+        # For any other error (missing file, access denied, ...) surface the detail.
+        if (-not $detail -or $detail -match '(?i)no object id') {
+            throw "No Object ID on '$Path' (use Set-FileObjectId first)"
+        }
+        throw "No Object ID on '$Path': $detail"
     }
     ConvertFrom-ObjectIdLine $line
 }

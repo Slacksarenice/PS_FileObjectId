@@ -48,8 +48,16 @@ Describe 'Get-FileObjectId' {
 
     It 'Throws when fsutil returns no Object ID line' {
         Mock Get-FsutilObjectId { 'Error: The file or directory is not reparse point.' } -ModuleName PSFileObjectId
+        Mock Get-FsutilErrorDetail { 'The specified file has no object id' } -ModuleName PSFileObjectId
 
-        { Get-FileObjectId -Path $testPath } | Should -Throw '*No Object ID*'
+        { Get-FileObjectId -Path $testPath } | Should -Throw '*No Object ID*use Set-FileObjectId first*'
+    }
+
+    It 'Surfaces the fsutil error detail when the file is missing' {
+        Mock Get-FsutilObjectId { } -ModuleName PSFileObjectId
+        Mock Get-FsutilErrorDetail { 'Error 2: The system cannot find the file specified.' } -ModuleName PSFileObjectId
+
+        { Get-FileObjectId -Path $testPath } | Should -Throw '*cannot find the file specified*'
     }
 }
 
@@ -83,6 +91,14 @@ Describe 'Set-FileObjectId' {
         $result | Should -BeOfType [Guid]
         Should -Invoke New-FsutilObjectId -Exactly 1 -ModuleName PSFileObjectId
         Should -Invoke Get-FsutilObjectId -Exactly 2 -ModuleName PSFileObjectId
+    }
+
+    It 'Throws with fsutil error detail when create fails' {
+        Mock Get-FsutilObjectId { } -ModuleName PSFileObjectId
+        Mock New-FsutilObjectId { } -ModuleName PSFileObjectId
+        Mock Get-FsutilErrorDetail { 'Error 2: The system cannot find the file specified.' } -ModuleName PSFileObjectId
+
+        { Set-FileObjectId -Path $testPath } | Should -Throw '*Failed to create*cannot find the file specified*'
     }
 }
 
