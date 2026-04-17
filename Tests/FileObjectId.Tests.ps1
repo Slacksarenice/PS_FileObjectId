@@ -48,8 +48,16 @@ Describe 'Get-FileObjectId' {
 
     It 'Throws when fsutil returns no Object ID line' {
         Mock Get-FsutilObjectId { 'Error: The file or directory is not reparse point.' } -ModuleName PSFileObjectId
+        Mock Get-FsutilErrorDetail { 'The specified file has no object id' } -ModuleName PSFileObjectId
 
-        { Get-FileObjectId -Path $testPath } | Should -Throw '*No Object ID*'
+        { Get-FileObjectId -Path $testPath } | Should -Throw '*No Object ID*use Set-FileObjectId first*'
+    }
+
+    It 'Surfaces the fsutil error detail when the file is missing' {
+        Mock Get-FsutilObjectId { } -ModuleName PSFileObjectId
+        Mock Get-FsutilErrorDetail { 'Error 2: The system cannot find the file specified.' } -ModuleName PSFileObjectId
+
+        { Get-FileObjectId -Path $testPath } | Should -Throw '*cannot find the file specified*'
     }
 }
 
@@ -84,11 +92,58 @@ Describe 'Set-FileObjectId' {
         Should -Invoke New-FsutilObjectId -Exactly 1 -ModuleName PSFileObjectId
         Should -Invoke Get-FsutilObjectId -Exactly 2 -ModuleName PSFileObjectId
     }
+
+    It 'Throws with fsutil error detail when create fails' {
+        Mock Get-FsutilObjectId { } -ModuleName PSFileObjectId
+        Mock New-FsutilObjectId { } -ModuleName PSFileObjectId
+        Mock Get-FsutilErrorDetail { 'Error 2: The system cannot find the file specified.' } -ModuleName PSFileObjectId
+
+        { Set-FileObjectId -Path $testPath } | Should -Throw '*Failed to create*cannot find the file specified*'
+    }
 }
 
 Describe 'Resolve-FileObjectId' -Tag 'Integration' {
+    It 'Handles paths longer than the initial 1024-char buffer without truncation' {
+        # fsutil itself is MAX_PATH-limited, so we can't Set-FileObjectId on a
+        # long path directly. Instead, assign the ID on a short path, then move
+        # the file into a deep directory tree so Resolve-FileObjectId's P/Invoke
+        # path has to return a >1024-char path. Requires long-path support on
+        # the host for Move-Item / New-Item to succeed on the destination.
+        $shortFile = New-TemporaryFile
+        $segment = 'a' * 200
+        $longRoot = Join-Path $env:TEMP "longpath-test-$(Get-Random)"
+        $longDir = $longRoot
+        1..6 | ForEach-Object { $longDir = Join-Path $longDir $segment }
+        $longFile = Join-Path $longDir "moved-$(Get-Random).tmp"
+
+        try {
+            $id = Set-FileObjectId -Path $shortFile.FullName
+
+            try {
+                New-Item -ItemType Directory -Path $longDir -Force -ErrorAction Stop | Out-Null
+                Move-Item -Path $shortFile.FullName -Destination $longFile -ErrorAction Stop
+            } catch {
+                Set-ItResult -Skipped -Because "host does not support long paths: $($_.Exception.Message)"
+                return
+            }
+
+            $longFile.Length | Should -BeGreaterThan 1024
+
+            $resolved = Resolve-FileObjectId -ObjectId $id
+
+            # If the resize branch didn't fire, $resolved would be silently
+            # truncated at 1024 chars and Test-Path on it would fail.
+            $resolved.Length | Should -BeGreaterThan 1024
+            Test-Path $resolved | Should -BeTrue
+        } finally {
+            if (Test-Path $longRoot) { Remove-Item $longRoot -Recurse -Force -ErrorAction SilentlyContinue }
+            if (Test-Path $shortFile.FullName) { Remove-Item $shortFile.FullName -Force -ErrorAction SilentlyContinue }
+        }
+    }
+
     It 'Resolves a moved file by its Object ID' {
         $tempFile = New-TemporaryFile
+        $newPath = $null
         try {
             $id = Set-FileObjectId -Path $tempFile.FullName
             $id | Should -BeOfType [Guid]
@@ -97,9 +152,13 @@ Describe 'Resolve-FileObjectId' -Tag 'Integration' {
             Move-Item $tempFile.FullName $newPath
 
             $resolved = Resolve-FileObjectId -ObjectId $id
-            $resolved | Should -Be $newPath
+            # Compare by Object ID rather than path string: path normalization can
+            # differ (for example, 8.3 short-name segments vs. long-name form), and
+            # the Object ID is the strongest identity check available here anyway.
+            Test-Path $resolved | Should -BeTrue
+            Get-FileObjectId -Path $resolved | Should -Be $id
         } finally {
-            if (Test-Path $newPath) { Remove-Item $newPath -Force }
+            if ($newPath -and (Test-Path $newPath)) { Remove-Item $newPath -Force }
             if (Test-Path $tempFile.FullName) { Remove-Item $tempFile.FullName -Force }
         }
     }

@@ -26,7 +26,7 @@ jobs:
           $manifest = Import-PowerShellDataFile ./PSFileObjectId/PSFileObjectId.psd1
           $moduleVersion = $manifest.ModuleVersion
           if ($tagVersion -ne $moduleVersion) {
-              throw "Tag version '$tagVersion' does not match ModuleVersion '$moduleVersion' in FileObjectId.psd1"
+              throw "Tag version '$tagVersion' does not match ModuleVersion '$moduleVersion' in PSFileObjectId.psd1"
           }
           Write-Host "Version validated: $tagVersion"
 
