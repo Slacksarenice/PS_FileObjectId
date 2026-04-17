@@ -209,6 +209,8 @@ function Resolve-FileObjectId {
 
         try {
             # 1024 handles most paths; grow once if the full path is longer (up to 32767).
+            # Casts to [int] are required because $written is [uint32] and
+            # `New-Object StringBuilder $uint` binds to the (string) overload.
             $sb = New-Object System.Text.StringBuilder 1024
             $written = [Win32.FileId]::GetFinalPathNameByHandleW($h, $sb, $sb.Capacity, 0)
             if ($written -eq 0) {
@@ -216,7 +218,7 @@ function Resolve-FileObjectId {
                 throw "GetFinalPathNameByHandleW failed: $err"
             }
             if ($written -ge $sb.Capacity) {
-                $sb = New-Object System.Text.StringBuilder ($written + 1)
+                $sb = New-Object System.Text.StringBuilder ([int]($written + 1))
                 $written = [Win32.FileId]::GetFinalPathNameByHandleW($h, $sb, $sb.Capacity, 0)
                 if ($written -eq 0 -or $written -ge $sb.Capacity) {
                     $err = [System.Runtime.InteropServices.Marshal]::GetLastWin32Error()

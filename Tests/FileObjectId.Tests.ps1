@@ -103,6 +103,44 @@ Describe 'Set-FileObjectId' {
 }
 
 Describe 'Resolve-FileObjectId' -Tag 'Integration' {
+    It 'Handles paths longer than the initial 1024-char buffer without truncation' {
+        # fsutil itself is MAX_PATH-limited, so we can't Set-FileObjectId on a
+        # long path directly. Instead, assign the ID on a short path, then move
+        # the file into a deep directory tree so Resolve-FileObjectId's P/Invoke
+        # path has to return a >1024-char path. Requires long-path support on
+        # the host for Move-Item / New-Item to succeed on the destination.
+        $shortFile = New-TemporaryFile
+        $segment = 'a' * 200
+        $longRoot = Join-Path $env:TEMP "longpath-test-$(Get-Random)"
+        $longDir = $longRoot
+        1..6 | ForEach-Object { $longDir = Join-Path $longDir $segment }
+        $longFile = Join-Path $longDir "moved-$(Get-Random).tmp"
+
+        try {
+            $id = Set-FileObjectId -Path $shortFile.FullName
+
+            try {
+                New-Item -ItemType Directory -Path $longDir -Force -ErrorAction Stop | Out-Null
+                Move-Item -Path $shortFile.FullName -Destination $longFile -ErrorAction Stop
+            } catch {
+                Set-ItResult -Skipped -Because "host does not support long paths: $($_.Exception.Message)"
+                return
+            }
+
+            $longFile.Length | Should -BeGreaterThan 1024
+
+            $resolved = Resolve-FileObjectId -ObjectId $id
+
+            # If the resize branch didn't fire, $resolved would be silently
+            # truncated at 1024 chars and Test-Path on it would fail.
+            $resolved.Length | Should -BeGreaterThan 1024
+            Test-Path $resolved | Should -BeTrue
+        } finally {
+            if (Test-Path $longRoot) { Remove-Item $longRoot -Recurse -Force -ErrorAction SilentlyContinue }
+            if (Test-Path $shortFile.FullName) { Remove-Item $shortFile.FullName -Force -ErrorAction SilentlyContinue }
+        }
+    }
+
     It 'Resolves a moved file by its Object ID' {
         $tempFile = New-TemporaryFile
         $newPath = $null
