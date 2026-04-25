@@ -61,8 +61,10 @@ jobs:
 
       - name: Sign .nupkg
         shell: pwsh
+        env:
+          SIGN_TOOL_VERSION: 0.9.0-preview.24327.1
         run: |
-          dotnet tool install --global sign --prerelease
+          dotnet tool install --global sign --version $env:SIGN_TOOL_VERSION --add-source https://api.nuget.org/v3/index.json
           sign code trusted-signing `
             "${{ steps.package.outputs.nupkg_path }}" `
             -tse "${{ secrets.SIGNING_ENDPOINT }}" `
