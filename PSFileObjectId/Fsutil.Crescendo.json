@@ -4,7 +4,7 @@
         {
             "Verb": "Get",
             "Noun": "FsutilObjectId",
-            "OriginalName": "fsutil.exe",
+            "OriginalName": "$env:SystemRoot\\System32\\fsutil.exe",
             "OriginalCommandElements": ["objectid", "query"],
             "Description": "Query the NTFS Object ID of a file using fsutil objectid query.",
             "Parameters": [
@@ -21,7 +21,7 @@
         {
             "Verb": "New",
             "Noun": "FsutilObjectId",
-            "OriginalName": "fsutil.exe",
+            "OriginalName": "$env:SystemRoot\\System32\\fsutil.exe",
             "OriginalCommandElements": ["objectid", "create"],
             "Description": "Create an NTFS Object ID on a file using fsutil objectid create.",
             "Parameters": [

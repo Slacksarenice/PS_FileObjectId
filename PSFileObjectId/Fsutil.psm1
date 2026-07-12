@@ -154,10 +154,10 @@ PROCESS {
     }
     $__handler = $__handlerInfo.Handler
     if ( $__handlerInfo.StreamOutput ) {
-        & "fsutil.exe" objectid query $__commandArgs 2>&1| Push-CrescendoNativeError | & $__handler
+        & "$env:SystemRoot\System32\fsutil.exe" objectid query $__commandArgs 2>&1| Push-CrescendoNativeError | & $__handler
     }
     else {
-        $result = & "fsutil.exe" objectid query $__commandArgs 2>&1| Push-CrescendoNativeError
+        $result = & "$env:SystemRoot\System32\fsutil.exe" objectid query $__commandArgs 2>&1| Push-CrescendoNativeError
         & $__handler $result
     }
     # Pop-CrescendoNativeError -EmitAsError
@@ -282,10 +282,10 @@ PROCESS {
     }
     $__handler = $__handlerInfo.Handler
     if ( $__handlerInfo.StreamOutput ) {
-        & "fsutil.exe" objectid create $__commandArgs 2>&1| Push-CrescendoNativeError | & $__handler
+        & "$env:SystemRoot\System32\fsutil.exe" objectid create $__commandArgs 2>&1| Push-CrescendoNativeError | & $__handler
     }
     else {
-        $result = & "fsutil.exe" objectid create $__commandArgs 2>&1| Push-CrescendoNativeError
+        $result = & "$env:SystemRoot\System32\fsutil.exe" objectid create $__commandArgs 2>&1| Push-CrescendoNativeError
         & $__handler $result
     }
     # Pop-CrescendoNativeError -EmitAsError

@@ -59,6 +59,19 @@ Describe 'Get-FileObjectId' {
 
         { Get-FileObjectId -Path $testPath } | Should -Throw '*cannot find the file specified*'
     }
+
+    It 'Parses the ID line even when fsutil labels are localized' {
+        # fsutil labels are MUI resource strings that language packs translate,
+        # so the parser must key on the hex payload, not the English label.
+        Mock Get-FsutilObjectId {
+            @(
+                "Objektbezeichner : $script:testHex"
+                "BirthVolume-ID : 00000000000000000000000000000000"
+            )
+        } -ModuleName PSFileObjectId
+
+        Get-FileObjectId -Path $testPath | Should -Be $testGuid
+    }
 }
 
 Describe 'Set-FileObjectId' {
@@ -99,6 +112,25 @@ Describe 'Set-FileObjectId' {
         Mock Get-FsutilErrorDetail { 'Error 2: The system cannot find the file specified.' } -ModuleName PSFileObjectId
 
         { Set-FileObjectId -Path $testPath } | Should -Throw '*Failed to create*cannot find the file specified*'
+    }
+
+    It 'Prefers the create call''s own error text over the re-query detail' {
+        # fsutil writes errors to stdout, so a failed create emits its cause
+        # (e.g. access denied) on the success stream; that beats re-querying,
+        # which would only restate that the file has no ID.
+        Mock Get-FsutilObjectId { } -ModuleName PSFileObjectId
+        Mock New-FsutilObjectId { 'Error 5: Access is denied.' } -ModuleName PSFileObjectId
+        Mock Get-FsutilErrorDetail { 'The specified file has no object id' } -ModuleName PSFileObjectId
+
+        { Set-FileObjectId -Path $testPath } | Should -Throw '*Failed to create*Access is denied*'
+    }
+
+    It 'Does not create an ID under -WhatIf' {
+        Mock Get-FsutilObjectId { 'The specified file has no object id' } -ModuleName PSFileObjectId
+        Mock New-FsutilObjectId { } -ModuleName PSFileObjectId
+
+        Set-FileObjectId -Path $testPath -WhatIf | Should -BeNullOrEmpty
+        Should -Invoke New-FsutilObjectId -Exactly 0 -ModuleName PSFileObjectId
     }
 }
 
