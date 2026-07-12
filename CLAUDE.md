@@ -15,7 +15,7 @@ even after it's been moved or renamed anywhere on the same volume.
 ```
 PSFileObjectId/
     PSFileObjectId.psm1      # Main module code (P/Invoke + functions)
-    PSFileObjectId.psd1      # Module manifest (Author: Seth Miller)
+    PSFileObjectId.psd1      # Module manifest (Author: Slacksarenice)
     Fsutil.Crescendo.json    # Crescendo config for fsutil wrappers (build-time source)
     Fsutil.psm1              # Generated Crescendo wrappers (NestedModule)
 Tests/
@@ -30,7 +30,7 @@ LICENSE                      # MIT license
 
 The module uses Crescendo-generated wrappers (`Get-FsutilObjectId`,
 `New-FsutilObjectId`) for `fsutil objectid` subcommands. These are loaded
-as a `NestedModules` entry in the manifest and are internal — not exported
+as a `NestedModules` entry in the manifest and are internal, not exported
 to users. This makes the fsutil calls mockable by Pester.
 
 To regenerate the wrappers after editing `Fsutil.Crescendo.json`:
@@ -56,19 +56,19 @@ adding or renaming functions. Do not add the Crescendo wrapper functions
 
 ## How it works
 
-1. **Assigning IDs** — `Set-FileObjectId` calls `Get-FsutilObjectId` (which
+1. **Assigning IDs**: `Set-FileObjectId` calls `Get-FsutilObjectId` (which
    wraps `fsutil objectid query`) to check whether one exists, then
    `New-FsutilObjectId` (which wraps `fsutil objectid create`) if not.
-2. **Reading IDs** — `Get-FileObjectId` calls `Get-FsutilObjectId` and parses
+2. **Reading IDs**: `Get-FileObjectId` calls `Get-FsutilObjectId` and parses
    the output. The hex string it prints is the raw on-disk byte order, which
    is exactly what `[Guid]::new([byte[]])` expects (little-endian for the
    first three fields), so no manual byte swapping is needed.
-3. **Resolving IDs to paths** — `Resolve-FileObjectId` uses P/Invoke against
+3. **Resolving IDs to paths**: `Resolve-FileObjectId` uses P/Invoke against
    `kernel32.dll`:
    - `CreateFileW` opens the volume root (`C:\`) as a *directory handle*
      using `FILE_FLAG_BACKUP_SEMANTICS` and zero access rights. This is the
      "volume hint" for `OpenFileById` and crucially does **not** require
-     admin — unlike opening the raw volume (`\\.\C:`), which does.
+     admin, unlike opening the raw volume (`\\.\C:`), which does.
    - `OpenFileById` with a `FILE_ID_DESCRIPTOR` of type `1` (ObjectId)
      returns a handle to the file.
    - `GetFinalPathNameByHandleW` turns that handle back into a path. The
@@ -82,7 +82,7 @@ adding or renaming functions. Do not add the Crescendo wrapper functions
   `GENERIC_READ` specifically.
 - **`Add-Type` duplicate definitions.** Re-running the module in the same
   session will throw if the type already exists. The `if (-not ('Win32.FileId' -as [type]))`
-  guard at the top handles this — don't remove it.
+  guard at the top handles this, so don't remove it.
 - **Admin requirement.** The module intentionally avoids needing admin by
   using the directory-handle hint. If you ever switch back to `\\.\$Volume`,
   the module will start failing with error 5 (`ERROR_ACCESS_DENIED`) for
@@ -92,12 +92,21 @@ adding or renaming functions. Do not add the Crescendo wrapper functions
   four **undashed** 32-character hex strings, not standard dashed GUIDs.
   `fsutil objectid query` prints them the same way. If you add any code that
   passes GUIDs to or parses them from `fsutil`, strip/expect no dashes.
+- **fsutil output is MUI-localized.** Labels like `Object ID :` and error
+  text like `The specified file has no object id` are resource strings that
+  language packs translate. Don't match on English labels; match the
+  32-char hex payload instead (see `Find-ObjectIdLine`). The ID line is
+  always printed first, before BirthVolume/BirthObjectId/Domain.
+- **fsutil invocation is PATH-hardened.** Both the Crescendo config and the
+  generated wrappers invoke `$env:SystemRoot\System32\fsutil.exe` by full
+  path (same as `Get-FsutilErrorDetail`) so a rogue `fsutil.exe` earlier in
+  PATH can't be substituted. Keep that if regenerating from the JSON.
 - **Object IDs are per-volume.** They don't survive cross-volume moves,
   copies, or most restore operations. Don't add features that assume
   otherwise without a fallback (content hash, USN journal lookup, etc.).
 - **Crescendo wrapper completeness.** The generated `Fsutil.psm1` must
   include `Push-CrescendoNativeError`. If regenerating from the JSON config,
-  verify this function is present — some Crescendo versions omit it.
+  verify this function is present; some Crescendo versions omit it.
 - **Pester mocking scope.** Tests must use `-ModuleName PSFileObjectId` on
   `Mock` and `Should -Invoke` calls for the Crescendo wrappers, since
   they are internal (not exported) functions called within the module scope.

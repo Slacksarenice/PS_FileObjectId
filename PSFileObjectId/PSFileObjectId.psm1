@@ -39,6 +39,23 @@ function ConvertFrom-ObjectIdLine {
     ConvertTo-GuidFromHex $hex
 }
 
+function Find-ObjectIdLine {
+    # Private helper: returns the first line of fsutil objectid output whose
+    # value is a 32-char hex string. fsutil always prints the Object ID line
+    # first (before BirthVolume ID, BirthObjectId ID, and Domain ID), and its
+    # labels are MUI-localized, so match on the hex payload rather than the
+    # English "Object ID" label.
+    param($Output)
+    $Output | Select-String ':\s*[0-9a-fA-F]{32}\s*$' | Select-Object -First 1
+}
+
+function Get-Win32ErrorMessage {
+    # Private helper: renders a Win32 error code as its system message plus
+    # the numeric code, e.g. "Access is denied. (error 5)".
+    param([Parameter(Mandatory)][int]$Code)
+    '{0} (error {1})' -f [System.ComponentModel.Win32Exception]::new($Code).Message, $Code
+}
+
 function Get-FsutilErrorDetail {
     # Private helper: the Crescendo wrappers swallow fsutil's stderr into an
     # unread queue, so re-invoke fsutil directly to recover the error text.
@@ -71,8 +88,12 @@ function ConvertTo-GuidFromHex {
         query and converts it to a [Guid]. Dashes, spaces, and other non-hex characters
         are stripped before conversion.
     .PARAMETER Hex
-        A 32-character hexadecimal string. Dashes and spaces are allowed and will be
-        stripped automatically.
+        A 32-character hexadecimal string in fsutil's raw on-disk byte order.
+        Dashes and spaces are allowed and will be stripped automatically.
+        Do not pass the dashed display form of an existing [Guid] (for example
+        the string printed by Get-FileObjectId): the first three fields would
+        be silently byte-swapped and a different Guid returned. To parse a
+        dashed Guid string, cast it with [Guid] instead.
     .EXAMPLE
         ConvertTo-GuidFromHex '0102030405060708090a0b0c0d0e0f10'
     .OUTPUTS
@@ -106,15 +127,28 @@ function Set-FileObjectId {
     .LINK
         https://github.com/Slacksarenice/PS_FileObjectId
     #>
+    [CmdletBinding(SupportsShouldProcess)]
     param([Parameter(Mandatory)][string]$Path)
-    $query = Get-FsutilObjectId -Path $Path 2>&1
-    $match = $query | Select-String '^Object ID'
+    $query = Get-FsutilObjectId -Path $Path -ErrorAction SilentlyContinue
+    $match = Find-ObjectIdLine $query
     if (-not $match) {
-        $null = New-FsutilObjectId -Path $Path 2>&1
-        $query = Get-FsutilObjectId -Path $Path 2>&1
-        $match = $query | Select-String '^Object ID'
+        if (-not $PSCmdlet.ShouldProcess($Path, 'Create NTFS Object ID')) { return }
+        $create = New-FsutilObjectId -Path $Path -ErrorAction SilentlyContinue
+        $query = Get-FsutilObjectId -Path $Path -ErrorAction SilentlyContinue
+        $match = Find-ObjectIdLine $query
         if (-not $match) {
-            $detail = Get-FsutilErrorDetail -Path $Path
+            # fsutil writes its error text to stdout, so the create call's own
+            # output is the most accurate detail (e.g. "Error 5: Access is
+            # denied."). Fall back to re-querying, but drop a "no object id"
+            # detail there: it restates what we already know and would mask
+            # the create failure.
+            $detail = $create | ForEach-Object { $_.ToString().Trim() } |
+                Where-Object { $_ -and $_ -notmatch ':\s*[0-9a-fA-F]{32}\s*$' } |
+                Select-Object -First 1
+            if (-not $detail) {
+                $detail = Get-FsutilErrorDetail -Path $Path
+                if ($detail -match '(?i)no object id') { $detail = $null }
+            }
             $suffix = if ($detail) { ": $detail" } else { '' }
             throw "Failed to create Object ID on '$Path'$suffix"
         }
@@ -139,11 +173,11 @@ function Get-FileObjectId {
         https://github.com/Slacksarenice/PS_FileObjectId
     #>
     param([Parameter(Mandatory)][string]$Path)
-    $line = Get-FsutilObjectId -Path $Path 2>&1 | Select-String '^Object ID'
+    $line = Find-ObjectIdLine (Get-FsutilObjectId -Path $Path -ErrorAction SilentlyContinue)
     if (-not $line) {
         $detail = Get-FsutilErrorDetail -Path $Path
         # "The specified file has no object id" is fsutil's way of telling us the
-        # file exists but lacks an ID — redirect the user to Set-FileObjectId.
+        # file exists but lacks an ID, so redirect the user to Set-FileObjectId.
         # For any other error (missing file, access denied, ...) surface the detail.
         if (-not $detail -or $detail -match '(?i)no object id') {
             throw "No Object ID on '$Path' (use Set-FileObjectId first)"
@@ -183,19 +217,18 @@ function Resolve-FileObjectId {
         [string]$Volume = 'C:'
     )
 
-    $GENERIC_READ               = [uint32]2147483648
-    $FILE_SHARE_RW              = [uint32]3
+    $FILE_SHARE_RWD             = [uint32]7  # read, write, delete
     $OPEN_EXISTING              = [uint32]3
     $FILE_FLAG_BACKUP_SEMANTICS = [uint32]0x02000000
 
-    # Open the volume root as a directory hint — no admin required
+    # Open the volume root as a directory hint (no admin required)
     $vol = [Win32.FileId]::CreateFileW("$Volume\",
-        [uint32]0, $FILE_SHARE_RW, [IntPtr]::Zero,
+        [uint32]0, $FILE_SHARE_RWD, [IntPtr]::Zero,
         $OPEN_EXISTING, $FILE_FLAG_BACKUP_SEMANTICS, [IntPtr]::Zero)
     if ($vol.IsInvalid) {
         $err = [System.Runtime.InteropServices.Marshal]::GetLastWin32Error()
         $vol.Dispose()
-        throw "CreateFileW failed: $err"
+        throw "CreateFileW failed: $(Get-Win32ErrorMessage $err)"
     }
 
     try {
@@ -204,12 +237,15 @@ function Resolve-FileObjectId {
         $desc.Type = 1  # ObjectId
         $desc.Id = $ObjectId
 
+        # Attribute-only open (access 0, share all): resolving a path needs no
+        # read access, and this way files that are ACL-denied for reading,
+        # exclusively locked, or delete-pending can still be resolved.
         $h = [Win32.FileId]::OpenFileById($vol, [ref]$desc,
-            $GENERIC_READ, $FILE_SHARE_RW, [IntPtr]::Zero, $FILE_FLAG_BACKUP_SEMANTICS)
+            [uint32]0, $FILE_SHARE_RWD, [IntPtr]::Zero, $FILE_FLAG_BACKUP_SEMANTICS)
         if ($h.IsInvalid) {
             $err = [System.Runtime.InteropServices.Marshal]::GetLastWin32Error()
             $h.Dispose()
-            throw "OpenFileById failed: $err"
+            throw "OpenFileById failed: $(Get-Win32ErrorMessage $err)"
         }
 
         try {
@@ -220,14 +256,14 @@ function Resolve-FileObjectId {
             $written = [Win32.FileId]::GetFinalPathNameByHandleW($h, $sb, $sb.Capacity, 0)
             if ($written -eq 0) {
                 $err = [System.Runtime.InteropServices.Marshal]::GetLastWin32Error()
-                throw "GetFinalPathNameByHandleW failed: $err"
+                throw "GetFinalPathNameByHandleW failed: $(Get-Win32ErrorMessage $err)"
             }
             if ($written -ge $sb.Capacity) {
                 $sb = New-Object System.Text.StringBuilder ([int]($written + 1))
                 $written = [Win32.FileId]::GetFinalPathNameByHandleW($h, $sb, $sb.Capacity, 0)
                 if ($written -eq 0 -or $written -ge $sb.Capacity) {
                     $err = [System.Runtime.InteropServices.Marshal]::GetLastWin32Error()
-                    throw "GetFinalPathNameByHandleW failed after resize: $err"
+                    throw "GetFinalPathNameByHandleW failed after resize: $(Get-Win32ErrorMessage $err)"
                 }
             }
 
