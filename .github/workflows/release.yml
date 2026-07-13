@@ -5,24 +5,28 @@ on:
     tags:
       - 'v*'
 
-permissions:
-  contents: write
-  id-token: write
+permissions: {}
 
 jobs:
   release:
     runs-on: windows-latest
     environment: Azure-Runners
+    timeout-minutes: 20
+    permissions:
+      contents: write # gh release create
+      id-token: write # Azure OIDC login
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
-        env:
-          FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
 
       - name: Validate tag matches manifest version
         shell: pwsh
+        env:
+          TAG_NAME: ${{ github.ref_name }}
         run: |
-          $tagVersion = "${{ github.ref_name }}".TrimStart('v')
+          $tagVersion = $env:TAG_NAME.TrimStart('v')
           $manifest = Import-PowerShellDataFile ./PSFileObjectId/PSFileObjectId.psd1
           $moduleVersion = $manifest.ModuleVersion
           if ($tagVersion -ne $moduleVersion) {
@@ -33,7 +37,9 @@ jobs:
       - name: Run Pester unit tests
         shell: pwsh
         run: |
-          Install-Module Pester -MinimumVersion 5.0 -Force -Scope CurrentUser -SkipPublisherCheck
+          if (-not (Get-Module Pester -ListAvailable | Where-Object Version -ge '5.0')) {
+              Install-Module Pester -MinimumVersion 5.0 -Force -Scope CurrentUser -SkipPublisherCheck
+          }
           $result = Invoke-Pester ./Tests/ -ExcludeTag Integration -CI -PassThru
           if ($result.FailedCount -gt 0) {
               throw "$($result.FailedCount) test(s) failed"
@@ -57,54 +63,75 @@ jobs:
           client-id: ${{ secrets.AZURE_CLIENT_ID }}
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
-          enable-AzPSSession: true
 
       - name: Sign .nupkg
         shell: pwsh
         env:
-          SIGN_TOOL_VERSION: 0.9.0-preview.24327.1
+          # dotnet/sign has no stable release; the 1.x versions of the 'sign'
+          # package ID on NuGet are an unrelated legacy package - do not use them.
+          SIGN_TOOL_VERSION: 0.9.1-beta.26330.1
+          NUPKG_PATH: ${{ steps.package.outputs.nupkg_path }}
+          SIGNING_ENDPOINT: ${{ secrets.SIGNING_ENDPOINT }}
+          SIGNING_ACCOUNT_NAME: ${{ secrets.SIGNING_ACCOUNT_NAME }}
+          SIGNING_CERTIFICATE_PROFILE: ${{ secrets.SIGNING_CERTIFICATE_PROFILE }}
         run: |
           dotnet tool install --global sign --version $env:SIGN_TOOL_VERSION --add-source https://api.nuget.org/v3/index.json
+          if ($LASTEXITCODE -ne 0) { throw "Failed to install sign tool $env:SIGN_TOOL_VERSION" }
           sign code trusted-signing `
-            "${{ steps.package.outputs.nupkg_path }}" `
-            -tse "${{ secrets.SIGNING_ENDPOINT }}" `
-            -tsa "${{ secrets.SIGNING_ACCOUNT_NAME }}" `
-            -tscp "${{ secrets.SIGNING_CERTIFICATE_PROFILE }}" `
+            $env:NUPKG_PATH `
+            -tse $env:SIGNING_ENDPOINT `
+            -tsa $env:SIGNING_ACCOUNT_NAME `
+            -tscp $env:SIGNING_CERTIFICATE_PROFILE `
+            --azure-credential-type azure-cli `
             -t http://timestamp.acs.microsoft.com `
-            -d SHA256 `
+            -fd SHA256 `
+            -d "PSFileObjectId PowerShell module" `
+            -u "https://github.com/Slacksarenice/PS_FileObjectId" `
             -v Information
+          if ($LASTEXITCODE -ne 0) { throw "Signing failed with exit code $LASTEXITCODE" }
 
       - name: Upload signed .nupkg as artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: signed-nupkg
           path: ${{ steps.package.outputs.nupkg_path }}
+          if-no-files-found: error
 
       - name: Create GitHub Release
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
+          TAG_NAME: ${{ github.ref_name }}
+          NUPKG_PATH: ${{ steps.package.outputs.nupkg_path }}
         run: |
-          gh release create "${{ github.ref_name }}" `
-            "${{ steps.package.outputs.nupkg_path }}" `
-            --title "${{ github.ref_name }}" `
+          gh release create $env:TAG_NAME $env:NUPKG_PATH `
+            --title $env:TAG_NAME `
+            --verify-tag `
             --generate-notes
+          if ($LASTEXITCODE -ne 0) { throw "gh release create failed" }
 
   publish:
     needs: release
-    runs-on: windows-latest
+    runs-on: ubuntu-latest
     environment: PSGallery
+    timeout-minutes: 10
+    permissions:
+      contents: read
     steps:
       - name: Download signed .nupkg
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: signed-nupkg
 
       - name: Publish signed .nupkg to PowerShell Gallery
         shell: pwsh
+        env:
+          PSGALLERY_API_KEY: ${{ secrets.PSGALLERY_API_KEY }}
         run: |
           $nupkg = Get-ChildItem -Filter '*.nupkg' | Select-Object -First 1
+          if (-not $nupkg) { throw "No .nupkg found in downloaded artifact" }
           dotnet nuget push $nupkg.FullName `
             --source "https://www.powershellgallery.com/api/v2/package" `
-            --api-key "${{ secrets.PSGALLERY_API_KEY }}" `
+            --api-key $env:PSGALLERY_API_KEY `
             --skip-duplicate
+          if ($LASTEXITCODE -ne 0) { throw "dotnet nuget push failed with exit code $LASTEXITCODE" }
