@@ -71,17 +71,14 @@ jobs:
           # package ID on NuGet are an unrelated legacy package - do not use them.
           SIGN_TOOL_VERSION: 0.9.1-beta.26330.1
           NUPKG_PATH: ${{ steps.package.outputs.nupkg_path }}
-          SIGNING_ENDPOINT: ${{ secrets.SIGNING_ENDPOINT }}
-          SIGNING_ACCOUNT_NAME: ${{ secrets.SIGNING_ACCOUNT_NAME }}
-          SIGNING_CERTIFICATE_PROFILE: ${{ secrets.SIGNING_CERTIFICATE_PROFILE }}
         run: |
           dotnet tool install --global sign --version $env:SIGN_TOOL_VERSION --add-source https://api.nuget.org/v3/index.json
           if ($LASTEXITCODE -ne 0) { throw "Failed to install sign tool $env:SIGN_TOOL_VERSION" }
           sign code trusted-signing `
             $env:NUPKG_PATH `
-            -tse $env:SIGNING_ENDPOINT `
-            -tsa $env:SIGNING_ACCOUNT_NAME `
-            -tscp $env:SIGNING_CERTIFICATE_PROFILE `
+            -tse '${{ secrets.SIGNING_ENDPOINT }}' `
+            -tsa '${{ secrets.SIGNING_ACCOUNT_NAME }}' `
+            -tscp '${{ secrets.SIGNING_CERTIFICATE_PROFILE }}' `
             --azure-credential-type azure-cli `
             -t http://timestamp.acs.microsoft.com `
             -fd SHA256 `
@@ -125,13 +122,11 @@ jobs:
 
       - name: Publish signed .nupkg to PowerShell Gallery
         shell: pwsh
-        env:
-          PSGALLERY_API_KEY: ${{ secrets.PSGALLERY_API_KEY }}
         run: |
           $nupkg = Get-ChildItem -Filter '*.nupkg' | Select-Object -First 1
           if (-not $nupkg) { throw "No .nupkg found in downloaded artifact" }
           dotnet nuget push $nupkg.FullName `
             --source "https://www.powershellgallery.com/api/v2/package" `
-            --api-key $env:PSGALLERY_API_KEY `
+            --api-key '${{ secrets.PSGALLERY_API_KEY }}' `
             --skip-duplicate
           if ($LASTEXITCODE -ne 0) { throw "dotnet nuget push failed with exit code $LASTEXITCODE" }
